@@ -439,6 +439,11 @@ mcpServers:
   authorization server and registers itself there (dynamic client registration). An `oauth:` block
   is for clients registered by hand, with fixed endpoints and client ID, which this setup does not
   use.
+- **No `serverInstructions`.** The MCP server sends instructions with its `initialize` answer: what
+  the iTop tools are for and that they act with the user's own iTop rights. LibreChat v0.8.9 has a
+  [`serverInstructions`](https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/mcp_servers)
+  option to pass them to the model, but in the validation run neither `true` nor a text reached the
+  model for this OAuth server, so this setup does not use it.
 
 **`mcpSettings`:** the hosts LibreChat may contact for MCP:
 
