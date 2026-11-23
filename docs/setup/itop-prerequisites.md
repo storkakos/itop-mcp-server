@@ -44,17 +44,19 @@ manual and in the config snippets.
 | HTTPS | Required for iTop and the MCP server. OAuth over plain HTTP exposes every code and token. |
 | Cron | iTop's `webservices/cron.php` running. altioo-oauth-server cleans up expired connections hourly; without cron, an expired connection keeps its token until the client next tries to refresh it. |
 | Web server | Apache with `mod_rewrite` and `AllowOverride All` for the extension's directory, or nginx with the rules in [Web server rewrites](#web-server-rewrites) |
-| Reverse proxy | If iTop runs behind a reverse proxy, the web server must pass the caller's address to PHP (Apache `mod_remoteip`, nginx `real_ip`). Otherwise the extension's log and its registration rate limit see only the proxy's address. |
+| Reverse proxy | If iTop runs behind a reverse proxy, the web server must pass the caller's address to PHP (Apache `mod_remoteip`, nginx `real_ip`). Otherwise the extension's log and its registration rate limit see only the proxy's address. If the proxy terminates TLS, PHP must also see the public scheme, host and port, see [PHP behind a reverse proxy](#php-behind-a-reverse-proxy). Otherwise users land on iTop's home page after login instead of the consent page. |
 
 ### Tested with
 
 | Component | Version | Validation run |
 |---|---|---|
-| iTop | 3.2.3 | pending |
-| altioo-oauth-server | 0.1.0 | pending |
-| combodo-hybridauth (only with an identity provider) | 2.1.1 | pending |
-| combodo-oauth2-client (only with an identity provider; ships with iTop 3.2.3) | 1.0.9 | pending |
-| itop-attribute-encrypted-password (only with an identity provider; ships with iTop 3.2.3) | 1.1.1 | pending |
+| iTop | 3.2.3 | 2026-11-23 |
+| altioo-oauth-server | 0.1.0 | 2026-11-23 |
+| combodo-hybridauth (only with an identity provider) | 2.1.1 | 2026-11-23 |
+| combodo-oauth2-client (only with an identity provider; ships with iTop 3.2.3) | 1.0.9 | 2026-11-23 |
+| itop-attribute-encrypted-password (only with an identity provider; ships with iTop 3.2.3) | 1.1.1 | 2026-11-23 |
+
+The validation run used Apache 2.4 with mod_php 8.3 behind a TLS-terminating reverse proxy.
 
 Newer versions should work but are untested.
 
@@ -75,8 +77,9 @@ Download from the vendor and check the SHA256 before installing.
 provider). combodo-hybridauth depends on combodo-oauth2-client (which ships the HybridAuth library,
 including its Keycloak adapter), and that depends on itop-attribute-encrypted-password. Download
 only combodo-hybridauth. The other two ship with iTop 3.2.3 in `datamodels/2.x/`
-(combodo-oauth2-client 1.0.9, itop-attribute-encrypted-password 1.1.1); do **not** copy them into
-`extensions/` as well, or iTop finds the same module twice.
+(combodo-oauth2-client 1.0.9, itop-attribute-encrypted-password 1.1.1) and are installed with every
+iTop 3.2.3, even without hybridauth; do **not** copy them into `extensions/` as well, or iTop finds
+the same module twice.
 
 | Extension | Version | Download | SHA256 | Licence |
 |---|---|---|---|---|
@@ -139,26 +142,51 @@ datamodels/2.x/itop-attribute-encrypted-password/module.itop-attribute-encrypted
 They contain their `vendor/` libraries; no Composer run is needed.
 
 Copying alone changes nothing: iTop runs the compiled copy in `env-production/`, which the setup
-wizard creates in the next step.
+wizard creates in step 4.
 
-### 3. Run the setup wizard as an upgrade
+### 3. Make the configuration file writable for the wizard
 
-1. Open `https://itop.example.com/setup/` and choose **Upgrade an existing iTop instance**.
-2. In the extensions step, **tick altioo-oauth-server**. On an upgrade, new extensions are **not**
-   ticked by default. If you skip this, the extension is not installed and nothing below works.
+iTop keeps `conf/production/config-itop.php` read-only (mode `0440`). The setup wizard refuses an
+upgrade while it is: it stops with "the configuration file 'conf/production/config-itop.php' already
+exists and cannot be overwritten". Make it writable for the web server user, which owns it:
+
+```sh
+chmod u+w /var/www/itop/conf/production/config-itop.php
+```
+
+On Windows, clear the read-only attribute in the file's properties, or:
+
+```powershell
+attrib -R C:\inetpub\itop\conf\production\config-itop.php
+```
+
+### 4. Run the setup wizard as an upgrade
+
+1. Open `https://itop.example.com/setup/`, log in as an administrator, and choose **Upgrade an
+   existing iTop instance**.
+2. In the last extensions step ("Select additional extensions to install"), **tick Altioo OAuth
+   Server** (altioo-oauth-server). On an upgrade, new extensions are **not** ticked by default. If
+   you skip this, the extension is not installed and nothing below works.
    **Only with an identity provider:** also tick **oAuth/OpenID authentication**. That is
    combodo-hybridauth: it has no `extension.xml`, so the wizard shows it as its own checkbox under
    its module label, and it is not ticked either. combodo-oauth2-client and
-   itop-attribute-encrypted-password are hidden modules and get no checkbox. *To be checked in the
-   validation run:* that the wizard installs them along with hybridauth; if it reports a missing
-   dependency instead, check the folder name and the two `datamodels/2.x/` paths from step 2.
+   itop-attribute-encrypted-password get no checkbox: they are hidden modules that iTop selects
+   automatically and that a standard iTop 3.2.3 already has installed. The wizard's summary lists
+   them as "Oauth2 Client (hidden)" and "Encrypted password iTop attribute (hidden)". If it reports
+   a missing dependency instead, check the folder name and the two `datamodels/2.x/` paths from
+   step 2.
 3. Finish the wizard. It adds three tables (`priv_altioo_oauth_client`, `priv_altioo_oauth_grant`,
-   `priv_altioo_oauth_code`).
+   `priv_altioo_oauth_code`). Its last page shows "Manual operations required" with a link to the
+   altioo-oauth-server README; the steps that matter for the MCP server are the rest of this manual.
 
-### 4. Make the configuration file writable for the edit
+With hybridauth ticked, the wizard also writes a `combodo-hybridauth` block with the extension's
+defaults into the configuration file. [The example setup](example-keycloak-librechat.md#combodo-hybridauth-in-mymodulesettings)
+replaces it.
 
-After setup, iTop makes `conf/production/config-itop.php` read-only (mode `0440`). Make it writable
-for the edit and read-only again afterwards:
+### 5. Make the configuration file writable for the edit
+
+When the wizard finishes, iTop makes `config-itop.php` read-only again. Make it writable for the
+edit in [Configure iTop](#configure-itop), check it, and make it read-only again afterwards:
 
 ```sh
 chmod u+w /var/www/itop/conf/production/config-itop.php
@@ -366,6 +394,47 @@ location ^~ /env-production/altioo-oauth-server/ {
 
 Adjust `fastcgi_pass` to your PHP-FPM upstream.
 
+### PHP behind a reverse proxy
+
+When a reverse proxy terminates TLS and talks plain HTTP to iTop's web server, PHP sees `http`
+and port 80. After a login, iTop sends the user back to the page they came from (here: the
+altioo-oauth-server authorization page) only if that page's URL, as PHP sees it, starts with
+`app_root_url`. Otherwise it sends them to its home page, and the OAuth flow stops there. Two parts
+of iTop check this differently, and both must see the public URL:
+
+- iTop's own login (form and the redirect after choosing a login method) uses `HTTPS`,
+  `SERVER_NAME` and `SERVER_PORT`.
+- hybridauth (only with an identity provider) uses `REQUEST_SCHEME` and `HTTP_HOST`.
+
+The proxy must pass the public `Host` header and `X-Forwarded-Proto: https`.
+
+**Apache** (tested), in the iTop vhost that the proxy talks to:
+
+```apache
+# Public scheme, host and port, as clients see them
+ServerName https://itop.example.com:443
+UseCanonicalName On
+# HTTPS=on for PHP when the proxy says the client used HTTPS
+SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on
+```
+
+`ServerName` with scheme and `UseCanonicalName On` give PHP `REQUEST_SCHEME=https` and
+`SERVER_PORT=443`; `SetEnvIf` gives it `HTTPS=on`. `ServerName https://itop.example.com` alone is
+not enough. Only use `SetEnvIf` on `X-Forwarded-Proto` when the web server is reachable through the
+proxy only.
+
+**nginx** (not tested), in the `location` that passes PHP to PHP-FPM:
+
+```nginx
+fastcgi_param HTTPS on;
+fastcgi_param REQUEST_SCHEME https;
+fastcgi_param SERVER_PORT 443;
+fastcgi_param SERVER_NAME itop.example.com;
+```
+
+To check what PHP sees, log in through the OAuth flow (check 5 of the [check list](#check-list)):
+after the login, the browser must show the consent page, not iTop's home page.
+
 ### Other web servers
 
 Rewrite `/.well-known/oauth-authorization-server/env-production/altioo-oauth-server` and
@@ -495,6 +564,7 @@ assistant's tools work.
 |---|---|
 | The client cannot register | Its callback is not in `redirect_uris`. iTop's error log (channel `altioo-oauth-server`) names the URI it asked for. |
 | "Unknown application" on the iTop page | Same as above, or the client registered more than 24 hours ago without completing a connection; connect again. |
+| After the login you land on iTop's home page instead of the consent page | PHP does not see the public URL behind the reverse proxy. See [PHP behind a reverse proxy](#php-behind-a-reverse-proxy), then connect again. |
 | "Personal tokens not allowed" | The user's profiles are not in `personal_tokens_allowed_profiles`. |
 | The user is refused before the consent page | The user has none of the `required_profiles`. |
 | Login and consent work, but the client never shows "Connected" and keeps asking to connect; `docker logs` shows `Token abgelehnt` | `token` is missing from `allowed_login_types`, or `allow_rest_services_via_tokens` is not `true`. The server checks every request's token with a REST call, so every request gets `401`. |

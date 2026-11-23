@@ -87,10 +87,13 @@ What a user experiences the first time they connect the assistant:
 
 | Component | Version | Validation run |
 |---|---|---|
-| iTop | 3.2.3 | pending |
-| combodo-hybridauth | 2.1.1 | pending |
-| Keycloak | 26.8.2 | pending |
-| LibreChat | v0.8.9 | pending |
+| iTop | 3.2.3 | 2026-11-23 |
+| combodo-hybridauth | 2.1.1 | 2026-11-23 |
+| Keycloak | 26.8.2 | 2026-11-23 |
+| LibreChat | v0.8.9 | 2026-11-23 |
+
+The validation run used Keycloak and LibreChat as containers behind a TLS-terminating reverse
+proxy. LibreChat's v0.8.9 image is published on Docker Hub as `librechat/librechat:v0.8.9`.
 
 Newer versions should work but are untested.
 
@@ -197,7 +200,7 @@ Check 3 of the [check list](#check-list) tests that a user cannot change their e
 ## iTop: log in with Keycloak
 
 Make `config-itop.php` writable as described in
-[the prerequisites](itop-prerequisites.md#4-make-the-configuration-file-writable-for-the-edit), then
+[the prerequisites](itop-prerequisites.md#5-make-the-configuration-file-writable-for-the-edit), then
 change two places.
 
 ### `allowed_login_types` in `$MySettings`
@@ -216,6 +219,10 @@ Add `hybridauth-Keycloak` and keep `form` first:
 - `token` stays: the MCP server calls iTop's REST/JSON API with a token.
 
 ### `combodo-hybridauth` in `$MyModuleSettings`
+
+The setup wizard has already written a `combodo-hybridauth` block with the extension's defaults
+(providers Google, Twitter and Facebook, all disabled). Replace that whole block with this one; do
+not add a second one.
 
 ```php
 	'combodo-hybridauth' => array(
@@ -302,9 +309,10 @@ every Keycloak user in the realm may have an iTop account.
 
 > **Warning: `default_profiles` decides what the assistant can see for every new user.** Every user
 > created this way gets exactly these profiles, and the assistant acting for them reads everything
-> these profiles allow. If you turn on `synchronize_user` and leave `default_profiles` out, the
-> extension's built-in default applies: `Portal User` **and `Configuration Manager`**, which gives
-> every new Keycloak user read access to the whole CMDB.
+> these profiles allow. The extension's default is `Portal User` **and `Configuration Manager`**,
+> which gives every new Keycloak user read access to the whole CMDB. It applies if you leave
+> `default_profiles` out, and the setup wizard also writes it into the `combodo-hybridauth` block it
+> creates. Always set `default_profiles` yourself when you turn on `synchronize_user`.
 >
 > Use `Portal user` only. It is not in `personal_tokens_allowed_profiles` or `required_profiles`, so
 > new users cannot use the assistant until an administrator gives them an agent profile on purpose.
@@ -389,15 +397,14 @@ OPENID_CALLBACK_URL=/oauth/openid/callback
 # A long random value, for example from: openssl rand -hex 32
 OPENID_SESSION_SECRET=<random value>
 OPENID_BUTTON_LABEL=Sign in with Keycloak
-# Untested; set to false if login fails.
 OPENID_USE_PKCE=true
 ```
 
 - `OPENID_ISSUER` is the realm's issuer, without `/.well-known/...`.
 - `OPENID_CALLBACK_URL` is a path. LibreChat puts `DOMAIN_SERVER` in front of it, which must give
   exactly the **Valid redirect URI** of the `librechat` client.
-- `OPENID_USE_PKCE=true` adds PKCE on top of the client secret. *Untested; set to false if login
-  fails.* The validation run decides whether it stays.
+- `OPENID_USE_PKCE=true` adds PKCE (`S256`) on top of the client secret. Keycloak accepts it with
+  **PKCE method** left empty on the `librechat` client.
 - If only Keycloak users should use LibreChat, also set `ALLOW_REGISTRATION=false`. Keep
   `ALLOW_EMAIL_LOGIN` as it is if you need a local LibreChat admin account.
 
@@ -579,7 +586,7 @@ at Keycloak, and land on the altioo-oauth-server **consent page** naming the cli
 
 | Result | Fix |
 |---|---|
-| After the Keycloak login you land on iTop's home page instead of the consent page | hybridauth returns to the page you came from only if its URL, as PHP sees it (`REQUEST_SCHEME`, `HTTP_HOST`, `REQUEST_URI`), starts with iTop's `app_root_url`. Otherwise it falls back to the home page. Behind a reverse proxy that terminates TLS, PHP often sees `http` or an internal host. Make PHP see the public scheme and host, for example nginx `fastcgi_param REQUEST_SCHEME https;` with the public `Host` header passed through, or Apache `ServerName https://itop.example.com`. *To be checked in the validation run:* these snippets against the reverse proxy used there. Then start the connection in the client again. |
+| After the Keycloak login you land on iTop's home page instead of the consent page | iTop and hybridauth return to the page you came from only if its URL, as PHP sees it, starts with iTop's `app_root_url`. Behind a reverse proxy that terminates TLS, PHP sees `http` and port 80. See [PHP behind a reverse proxy](itop-prerequisites.md#php-behind-a-reverse-proxy) in the prerequisites; it covers both iTop's own login and hybridauth. Then start the connection in the client again. |
 | "Personal tokens not allowed", refusal before the consent page, "Unknown resource" | Not related to Keycloak: see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). The External user needs the same profiles as a local user would. |
 
 ### 5. A Keycloak user logs into LibreChat
