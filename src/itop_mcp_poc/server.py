@@ -25,6 +25,7 @@ import httpx
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import __version__
 from . import upstream_main as upstream
@@ -132,6 +133,16 @@ mcp.settings.auth = AuthSettings(
     required_scopes=["REST/JSON"],
 )
 mcp._token_verifier = ITopTokenVerifier()
+
+# DNS-Rebinding-Schutz: upstream erzeugt FastMCP mit Host 127.0.0.1, dadurch sind nur Loopback-Hosts
+# erlaubt, und das spaetere Setzen von settings.host aendert daran nichts. Hinter dem Reverse Proxy
+# kommt aber der oeffentliche Name aus MCP_RESOURCE_URL im Host-Header an. Den zusaetzlich erlauben;
+# alle anderen Hosts bleiben gesperrt (421). Loopback bleibt fuer den Container-Healthcheck.
+mcp.settings.transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*", *CONFIG.public_hosts],
+    allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*", CONFIG.public_origin],
+)
 
 
 def _audit(tool: str, args: dict[str, Any], user: str, ok: bool, info: str = "") -> None:

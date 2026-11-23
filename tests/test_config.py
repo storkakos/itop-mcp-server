@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import time
 
 import httpx
@@ -30,8 +31,18 @@ def _env(**config: str) -> dict[str, str]:
 
 
 def _start(**config: str) -> subprocess.Popen:
-    return subprocess.Popen([sys.executable, "-m", "itop_mcp_poc.server"], env=_env(**config),
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    # Output goes to a temp file, not a pipe: nobody reads the pipe while the server runs, and once
+    # its buffer is full the server blocks on logging and stops answering.
+    output = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+    proc = subprocess.Popen([sys.executable, "-m", "itop_mcp_poc.server"], env=_env(**config),
+                            stdout=output, stderr=subprocess.STDOUT, text=True)
+    proc.output = output
+    return proc
+
+
+def _output(proc: subprocess.Popen) -> str:
+    proc.output.seek(0)
+    return proc.output.read()
 
 
 def _run_until_exit(**config: str) -> subprocess.CompletedProcess:
@@ -57,7 +68,9 @@ class RunningServer:
     def stop(self) -> str:
         """Stop the server and return everything it printed."""
         self.proc.terminate()
-        out, _ = self.proc.communicate(timeout=10)
+        self.proc.wait(timeout=10)
+        out = _output(self.proc)
+        self.proc.output.close()
         return out
 
 
@@ -74,7 +87,7 @@ def start_server(tmp_path):
         deadline = time.monotonic() + 20
         while True:
             if proc.poll() is not None:
-                pytest.fail(f"server exited early:\n{proc.stdout.read()}")
+                pytest.fail(f"server exited early:\n{_output(proc)}")
             try:
                 httpx.get(f"{server.base_url}/.well-known/oauth-protected-resource/mcp", timeout=1)
                 return server
@@ -189,7 +202,7 @@ def test_defaults_for_host_and_audit_log_are_container_friendly():
     try:
         deadline = time.monotonic() + 20
         while True:
-            assert proc.poll() is None, proc.stdout.read()
+            assert proc.poll() is None, _output(proc)
             try:
                 server.metadata()
                 break
