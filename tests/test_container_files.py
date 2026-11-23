@@ -5,6 +5,7 @@ The container itself is checked by scripts/smoke-test.sh (needs Docker).
 from __future__ import annotations
 
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -128,3 +129,21 @@ def test_env_file_switch_is_marked_as_smoke_test_only():
     assert "MCP_PUBLISH_PORT" in comment.group(1) and "MCP_LOG_DIR" in comment.group(1)
     # .env.example does not offer the switch as an operator setting
     assert "MCP_ENV_FILE" not in _read(".env.example")
+
+
+def test_files_read_on_linux_are_pinned_to_lf():
+    # A Windows checkout copied to a Linux Docker host must not carry CRLF into the files the image,
+    # compose or the smoke test read. Checked via the git attributes, so it holds whatever core.autocrlf is.
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True).stdout
+    names = [n for n in tracked.decode("utf-8").split("\0") if n]
+    read_on_linux = [n for n in names
+                     if n.endswith((".py", ".sh", ".yaml", ".yml", ".toml", ".lock"))
+                     or Path(n).name in ("Dockerfile", ".env.example", ".dockerignore", "LICENSE-upstream-itop-mcp")]
+    assert {"Dockerfile", ".env.example", ".dockerignore", "compose.yaml", "pyproject.toml",
+            "requirements.lock", "scripts/smoke-test.sh", "src/itop_mcp_poc/__init__.py"} <= set(read_on_linux)
+
+    out = subprocess.run(["git", "check-attr", "-z", "eol", "--", *read_on_linux],
+                         cwd=ROOT, capture_output=True, check=True).stdout.decode("utf-8").split("\0")
+    eol = dict(zip(out[0::3], out[2::3]))
+
+    assert {n: e for n, e in eol.items() if e != "lf"} == {}

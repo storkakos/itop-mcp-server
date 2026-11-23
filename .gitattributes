@@ -1,2 +1,4 @@
-*.sh text eol=lf
-Dockerfile text eol=lf
+# Every text file gets LF in the working tree, also on Windows with core.autocrlf=true.
+# The working tree is copied as-is to Linux Docker hosts (see docs/agents/test-vm.md), where the
+# image, compose and scripts/smoke-test.sh read these files; a trailing \r breaks them there.
+* text=auto eol=lf
