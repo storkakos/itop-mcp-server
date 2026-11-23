@@ -262,6 +262,24 @@ def test_healthcheck_passes_against_running_server(start_server, itop, resource_
     assert not itop.requests  # needs no token and does not ask iTop
 
 
+def test_healthcheck_ignores_proxy_from_environment(start_server, itop):
+    # A customer sets HTTP(S)_PROXY in .env so the server reaches iTop; the healthcheck's loopback
+    # request must not go through that proxy, even without NO_PROXY.
+    server = start_server(ITOP_BASE_URL=itop.base_url, MCP_RESOURCE_URL=RESOURCE_URL, MCP_HOST="127.0.0.1")
+    port = server.base_url.rsplit(":", 1)[1]
+    dead_proxy = f"http://127.0.0.1:{free_port()}"  # nothing listens there
+    env = _env(ITOP_BASE_URL=itop.base_url, MCP_RESOURCE_URL=RESOURCE_URL, MCP_PORT=port)
+    for name in ("NO_PROXY", "no_proxy"):
+        env.pop(name, None)
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        env[name] = dead_proxy
+
+    result = subprocess.run([sys.executable, "-m", "itop_mcp_poc.healthcheck"], env=env,
+                            capture_output=True, text=True, timeout=30)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_healthcheck_fails_without_server():
     result = _healthcheck(ITOP_BASE_URL="https://itop.customer.test", MCP_RESOURCE_URL=RESOURCE_URL,
                           MCP_PORT=str(free_port()))
