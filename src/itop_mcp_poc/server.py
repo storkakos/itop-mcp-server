@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import os
 import re
 import time
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -62,15 +64,25 @@ def _redact(text: str) -> str:
     return re.sub(r"[A-Za-z0-9_\-]{32,}", "***", text)
 
 
-# Ergebnis jeder iTop-Anfrage waehrend eines umhuellten Upstream-Tools: (ok, Info).
-# Die Upstream-Tools fangen Fehler selbst ab und liefern nur Text, daher kommt das ok-Flag von hier.
-_itop_calls: ContextVar[list[tuple[bool, str]] | None] = ContextVar("itop_calls", default=None)
+@dataclass
+class _ToolCall:
+    """Was ein laufender Tool-Aufruf fuer seine Audit-Zeile sammelt (siehe _audited)."""
+
+    args: dict[str, Any]
+    # (ok, Info) je iTop-Anfrage des Tools, dazu eine Ausnahme, mit der das Tool endet.
+    # Die Upstream-Tools fangen Fehler selbst ab und liefern nur Text, daher kommt ok von hier.
+    itop: list[tuple[bool, str]] = field(default_factory=list)
+    user: str | None = None      # vom Tool selbst ermittelt (whoami), sonst schlaegt _audited nach
+    refused: str | None = None   # Meldung, wenn das Tool die Eingabe vor iTop abgelehnt hat
+
+
+_current_call: ContextVar[_ToolCall | None] = ContextVar("current_tool_call", default=None)
 
 
 def _record_itop_call(ok: bool, info: str) -> None:
-    calls = _itop_calls.get()
-    if calls is not None:
-        calls.append((ok, info))
+    call = _current_call.get()
+    if call is not None:
+        call.itop.append((ok, info))
 
 
 class ITopTokenClient(upstream.ITopClient):
@@ -189,9 +201,11 @@ def _audit(tool: str, args: dict[str, Any], user: str, ok: bool, info: str = "")
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def _refuse(tool: str, args: dict[str, Any], message: str) -> str:
-    """Abgelehnte Eingabe: auditieren (ohne iTop-Aufruf, daher Benutzer unbekannt) und Meldung zurueckgeben."""
-    _audit(tool, args, "?", False, f"abgelehnt: {message}")
+def _refuse(message: str) -> str:
+    """Abgelehnte Eingabe: fuer die Audit-Zeile vormerken (Benutzer bleibt "?", iTop wird nicht gefragt)."""
+    call = _current_call.get()
+    if call is not None:
+        call.refused = message
     return message
 
 
@@ -213,6 +227,15 @@ async def _current_user() -> str:
     return "?"
 
 
+async def _user_for_audit() -> str:
+    """Benutzer fuer die Audit-Zeile nachschlagen; diese Anfrage zaehlt nicht zum Ergebnis des Tools."""
+    reset = _current_call.set(None)
+    try:
+        return await _current_user()
+    finally:
+        _current_call.reset(reset)
+
+
 def _format(res: dict) -> str:
     if res.get("code") != 0:
         return f"iTop-Fehler {res.get('code')}: {res.get('message')}"
@@ -231,7 +254,9 @@ _READONLY_OQL = re.compile(r"^\s*SELECT\s+[A-Za-z_][A-Za-z0-9_]*(\s|$)", re.I)
 async def whoami() -> str:
     """Zeigt, als welche iTop-Person dieser Assistent gerade arbeitet (Rechte = Rechte dieser Person)."""
     user = await _current_user()
-    _audit("whoami", {}, user, True)
+    call = _current_call.get()
+    if call is not None:
+        call.user = user  # die Nachfrage ist hier das Tool selbst; ok kommt aus ihrem Ergebnis
     return f"Angemeldet in iTop als: {user}"
 
 
@@ -239,35 +264,31 @@ async def whoami() -> str:
 async def search_tickets(text: str = "", status: str = "", ticket_class: str = "UserRequest", limit: int = 20) -> str:
     """Sucht Tickets in iTop. ticket_class: UserRequest, Incident, Change, Problem oder Ticket.
     text sucht in Titel und Referenz. status z.B. new, assigned, pending, resolved, closed."""
-    audit_args = {"text": text, "status": status, "class": ticket_class}
     if ticket_class not in {"UserRequest", "Incident", "Change", "Problem", "Ticket"}:
-        return _refuse("search_tickets", audit_args, "Ungueltige Ticketklasse")
+        return _refuse("Ungueltige Ticketklasse")
     cond = []
     if text:
         t = text.replace("\\", "").replace("'", "\\'")
         cond.append(f"(title LIKE '%{t}%' OR ref LIKE '%{t}%')")
     if status:
         if not re.fullmatch(r"[a-z_]{2,30}", status):
-            return _refuse("search_tickets", audit_args, "Ungueltiger Status")
+            return _refuse("Ungueltiger Status")
         cond.append(f"status = '{status}'")
     oql = f"SELECT {ticket_class}" + (" WHERE " + " AND ".join(cond) if cond else "")
     fields = "ref,title,status,priority,caller_id_friendlyname,agent_id_friendlyname,org_id_friendlyname,start_date"
     if ticket_class == "Ticket":
         fields = "ref,title,operational_status,caller_id_friendlyname,agent_id_friendlyname,org_id_friendlyname,start_date"
-    res = await _get(oql, fields, limit)
-    _audit("search_tickets", audit_args, await _current_user(), res.get("code") == 0)
-    return _format(res)
+    return _format(await _get(oql, fields, limit))
 
 
 @mcp.tool()
 async def get_ticket(ref: str) -> str:
     """Liest ein Ticket mit Beschreibung und Verlauf (Referenz z.B. R-000123 oder I-000045)."""
     if not re.fullmatch(r"[A-Z]{1,3}-\d{1,9}", ref.strip()):
-        return _refuse("get_ticket", {"ref": ref}, "Ungueltige Ticketreferenz")
+        return _refuse("Ungueltige Ticketreferenz")
     res = await _get(f"SELECT Ticket WHERE ref = '{ref.strip()}'",
                      "ref,title,description,operational_status,caller_id_friendlyname,agent_id_friendlyname,"
                      "team_id_friendlyname,org_id_friendlyname,start_date,last_update,public_log", 1)
-    _audit("get_ticket", {"ref": ref}, await _current_user(), res.get("code") == 0)
     return _format(res)
 
 
@@ -276,39 +297,93 @@ async def oql_query(oql: str, fields: str = "friendlyname", limit: int = 20) -> 
     """Fuehrt eine lesende OQL-Abfrage aus (nur SELECT). Beispiel: SELECT Server WHERE status='production'.
     fields: kommagetrennte Attribute oder *. Der Server kappt bei MCP_MAX_ROWS Zeilen (Standard 50)."""
     if not _READONLY_OQL.match(oql) or ";" in oql:
-        return _refuse("oql_query", {"oql": oql, "fields": fields}, "Nur einzelne SELECT-Abfragen sind erlaubt.")
+        return _refuse("Nur einzelne SELECT-Abfragen sind erlaubt.")
     if not re.fullmatch(r"[A-Za-z0-9_,*\s]{1,400}", fields):
-        return _refuse("oql_query", {"oql": oql, "fields": fields}, "Ungueltige Feldliste")
-    res = await _get(oql.strip(), fields.replace(" ", ""), limit)
-    _audit("oql_query", {"oql": oql, "fields": fields}, await _current_user(), res.get("code") == 0, str(res.get("message", "")))
-    return _format(res)
+        return _refuse("Ungueltige Feldliste")
+    return _format(await _get(oql.strip(), fields.replace(" ", ""), limit))
 
 
-# Upstream-Tools: beim Registrieren umhuellt (Upstream-Modul bleibt unveraendert), damit auch sie
-# genau eine Audit-Zeile je Aufruf schreiben. Name, Parameter-Schema und Ergebnis bleiben gleich.
-UPSTREAM_TOOLS = ("smart_query_v2", "list_operations")
+# Audit: genau eine Zeile je Tool-Aufruf, fuer eigene und Upstream-Tools. Jedes registrierte Tool wird
+# nach dem Registrieren umhuellt (Upstream-Modul bleibt unveraendert); Name, Parameter-Schema und
+# Ergebnis bleiben gleich. Ein neu hinzugefuegtes Tool ist damit automatisch auditiert.
+#
+# Regel fuer ok und info (README, Abschnitt "Audit log"):
+# - Eingabe abgelehnt: ok=false, info "abgelehnt: ...", Benutzer "?" (iTop wird nicht gefragt).
+# - Kein iTop-Aufruf: ok=false, info "kein iTop-Aufruf: <erste Zeile der Antwort>".
+# - Sonst ok=true genau dann, wenn jede iTop-Anfrage des Tools ohne Fehler beantwortet wurde.
+#   Faengt ein Tool einen Fehler ab und antwortet trotzdem, bleibt ok=false: von aussen ist nicht zu
+#   unterscheiden, ob es sich erholt hat oder den Fehler nur in seinen Text schreibt (z. B. die
+#   Vergleichsabfragen von smart_query_v2). info nennt den ersten Fehler (iTops Meldung,
+#   "iTop HTTP 500", "iTop nicht erreichbar: ..."). Fuer whoami ist die Personen-Nachfrage das Tool
+#   selbst: schlaegt sie fehl, ist ok=false.
+# - Abgebrochen (z. B. Server faehrt herunter): ok=false, info "abgebrochen", Benutzer
+#   "?" (ausser whoami kannte ihn schon). Die Zeile wird ohne weiteres await geschrieben, denn in einem
+#   abgebrochenen Cancel-Scope bricht jedes await erneut ab.
+
+# Audit-Argumente, wo sie von den Tool-Parametern abweichen (Standardwerte sind eingesetzt).
+AUDIT_ARGS = {
+    "whoami": lambda a: {},
+    "search_tickets": lambda a: {"text": a["text"], "status": a["status"], "class": a["ticket_class"]},
+    "get_ticket": lambda a: {"ref": a["ref"]},
+    "oql_query": lambda a: {"oql": a["oql"], "fields": a["fields"]},
+}
+
+
+def _first_line(result: Any) -> str:
+    lines = str(result or "").strip().splitlines()
+    return lines[0] if lines else ""
+
+
+def _outcome(call: _ToolCall, result: Any) -> tuple[bool, str]:
+    """ok und info fuer einen zu Ende gelaufenen Aufruf (Regel oben)."""
+    if call.refused is not None:
+        return False, f"abgelehnt: {call.refused}"
+    if not call.itop:
+        return False, f"kein iTop-Aufruf: {_first_line(result)}"
+    failed = [info for ok, info in call.itop if not ok]
+    return (False, failed[0]) if failed else (True, "")
 
 
 def _audited(name: str, fn):
+    to_audit_args = AUDIT_ARGS.get(name)
+    signature = inspect.signature(fn)
+
     @functools.wraps(fn)
     async def wrapper(**kwargs: Any) -> Any:
-        calls: list[tuple[bool, str]] = []
-        reset = _itop_calls.set(calls)
+        if to_audit_args is None:
+            args = dict(kwargs)
+        else:
+            bound = signature.bind_partial(**kwargs)
+            bound.apply_defaults()
+            args = to_audit_args(bound.arguments)
+        call = _ToolCall(args)
+        result: Any = None
+        error: Exception | None = None
         try:
-            return await fn(**kwargs)
-        except Exception as e:
-            calls.append((False, str(e)))
+            reset = _current_call.set(call)
+            try:
+                result = await fn(**kwargs)
+            except Exception as e:  # noqa: BLE001 - nach der Audit-Zeile unveraendert weitergeworfen
+                error = e
+                call.itop.append((False, str(e)))
+            finally:
+                _current_call.reset(reset)
+            user = call.user or ("?" if call.refused is not None else await _user_for_audit())
+        except BaseException:
+            # Abgebrochen (CancelledError u. a.): sofort schreiben, kein await mehr.
+            failed = [info for ok, info in call.itop if not ok]
+            _audit(name, args, call.user or "?", False, "abgebrochen" + (f"; {failed[0]}" if failed else ""))
             raise
-        finally:
-            _itop_calls.reset(reset)
-            failed = [info for ok, info in calls if not ok]
-            _audit(name, kwargs, await _current_user(), bool(calls) and not failed, failed[0] if failed else "")
+        _audit(name, args, user, *_outcome(call, result))
+        if error is not None:
+            raise error
+        return result
+
     return wrapper
 
 
-for _name in UPSTREAM_TOOLS:
-    _tool = mcp._tool_manager.get_tool(_name)
-    _tool.fn = _audited(_name, _tool.fn)
+for _tool in mcp._tool_manager.list_tools():
+    _tool.fn = _audited(_tool.name, _tool.fn)
 
 
 def _check_audit_log_writable() -> None:
