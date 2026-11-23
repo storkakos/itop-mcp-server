@@ -1,0 +1,8 @@
+# Exact build backend for the Docker image (Linux, Python 3.13), installed before the server is
+# built with --no-build-isolation, so a new setuptools release cannot change or break the build.
+# setuptools and wheel must match [build-system] requires in pyproject.toml (checked by
+# tests/test_container_files.py); packaging is wheel's only dependency. Regenerate in a Linux
+# python:3.13-slim container: pip install setuptools==X wheel==Y && pip freeze --all.
+packaging==26.3
+setuptools==84.2.1
+wheel==0.48.0

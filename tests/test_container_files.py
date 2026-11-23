@@ -71,3 +71,33 @@ def test_compose_publishes_on_loopback_and_mounts_logs_at_default_path():
     assert re.search(r"^\s*- \$\{MCP_LOG_DIR:-\./logs\}:/data/logs\s*$", compose, re.M)
     assert re.search(r"^\s*read_only: true\s*$", compose, re.M)
     assert re.search(r"^\s*restart: unless-stopped\s*$", compose, re.M)
+
+
+def test_build_backend_is_pinned_and_used_by_the_image_build():
+    build_lock = _pins(_read("requirements-build.lock").splitlines())
+    requires = _pins(tomllib.loads(_read("pyproject.toml"))["build-system"]["requires"])
+    dockerfile = _read("Dockerfile")
+
+    # setuptools and wheel pinned exactly, pyproject.toml and the build lock agree
+    assert {"setuptools", "wheel"} <= build_lock.keys()
+    assert requires == {name: build_lock[name] for name in ("setuptools", "wheel")}
+    # every line of the build lock is an exact pin
+    lines = [l for l in _read("requirements-build.lock").splitlines() if l.strip() and not l.startswith("#")]
+    assert len(lines) == len(build_lock)
+    # the image installs the pinned backend and builds the server with it, without build isolation
+    # (which would resolve the build backend freshly from pyproject.toml)
+    assert re.search(r"^COPY .*\brequirements-build\.lock\b", dockerfile, re.M)
+    assert re.search(r"pip install --no-deps -r requirements-build\.lock", dockerfile)
+    assert re.search(r"pip install --no-deps --no-build-isolation \.", dockerfile)
+    assert "!requirements-build.lock" in _read(".dockerignore").splitlines()
+
+
+def test_env_file_switch_is_marked_as_smoke_test_only():
+    compose = _read("compose.yaml")
+    comment = re.search(r"((?:^[ \t]*#.*\n)+)[ \t]*env_file: \$\{MCP_ENV_FILE:-\.env\}", compose, re.M)
+
+    assert comment, "env_file needs a comment directly above it"
+    assert "scripts/smoke-test.sh" in comment.group(1)
+    assert "MCP_PUBLISH_PORT" in comment.group(1) and "MCP_LOG_DIR" in comment.group(1)
+    # .env.example does not offer the switch as an operator setting
+    assert "MCP_ENV_FILE" not in _read(".env.example")

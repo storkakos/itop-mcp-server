@@ -14,12 +14,15 @@ RUN groupadd --system --gid 10001 mcp \
 
 WORKDIR /app
 
-# Pinned dependency tree first (cached layer), then the server itself without resolving again.
-COPY requirements.lock ./
-RUN pip install --no-deps -r requirements.lock
+# Pinned dependency tree and build backend first (cached layer), then the server itself without
+# resolving again. --no-build-isolation builds with the pinned setuptools/wheel installed here
+# instead of fetching the newest setuptools for [build-system] in pyproject.toml.
+COPY requirements.lock requirements-build.lock ./
+RUN pip install --no-deps -r requirements.lock \
+ && pip install --no-deps -r requirements-build.lock
 COPY pyproject.toml LICENSE-upstream-itop-mcp ./
 COPY src ./src
-RUN pip install --no-deps . \
+RUN pip install --no-deps --no-build-isolation . \
  && pip check \
  && rm -rf /app/src
 

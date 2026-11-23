@@ -1,6 +1,7 @@
 *
 !Dockerfile
 !requirements.lock
+!requirements-build.lock
 !pyproject.toml
 !LICENSE-upstream-itop-mcp
 !src/
