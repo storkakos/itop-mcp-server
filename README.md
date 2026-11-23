@@ -13,6 +13,10 @@ as LibreChat use it to let users read tickets and CIs from iTop through an AI as
 
 Based on [cdmx-in/itop-mcp](https://github.com/cdmx-in/itop-mcp) (MIT).
 
+New here? The [**quick start for administrators**](docs/quick-start.md) walks through the whole
+setup in order, with screenshots, and links to the detailed sections below. For the people who
+use the assistant, there is a [**user guide**](docs/user-guide.md).
+
 ## Contents
 
 1. [Prerequisites on the iTop side](#prerequisites-on-the-itop-side)
@@ -289,7 +293,7 @@ All tools are read-only. Results are capped at `MCP_MAX_ROWS` rows.
 |---|---|
 | `whoami` | Names the iTop person the assistant is acting as |
 | `search_tickets` | Searches tickets by text (title and reference), status and class (`UserRequest`, `Incident`, `Change`, `Problem`, `Ticket`) |
-| `get_ticket` | Reads one ticket by reference (e.g. `R-000123`) with description and public log |
+| `get_ticket` | Reads one ticket by reference (e.g. `R-000123`) with description; for user requests and incidents also status, priority and public log |
 | `oql_query` | Runs a single OQL `SELECT`; anything else is refused before it reaches iTop |
 | `smart_query_v2` | From upstream: turns a natural-language question into an iTop query |
 | `list_operations` | From upstream: lists the operations of iTop's REST API |

@@ -123,7 +123,7 @@ iTop logs users in through a **confidential** OpenID Connect client named `itop`
 | | Standard Token Exchange | Off |
 | | OAuth 2.0 Device Authorization Grant | Off |
 | | OIDC CIBA Grant | Off |
-| | PKCE method | empty (see below) |
+| | Require PKCE | Off (see below) |
 | Login settings | Root URL | `https://itop.example.com` |
 | | Home URL | `https://itop.example.com/` |
 | | Valid redirect URIs | `https://itop.example.com/env-production/combodo-hybridauth/landing.php` (exactly this, no wildcard) |
@@ -135,8 +135,8 @@ Why these values:
 - **Standard flow only.** hybridauth uses the authorization code flow. Direct access grants would let
   anyone with the client secret exchange a user's password for tokens; implicit flow and service
   accounts are not used.
-- **PKCE method empty.** The HybridAuth Keycloak adapter that hybridauth uses does not send PKCE
-  parameters, so `S256` or `plain` here would make every login fail. The client is confidential,
+- **Require PKCE off.** The HybridAuth Keycloak adapter that hybridauth uses does not send PKCE
+  parameters, so requiring PKCE would make every login fail. The client is confidential,
   so the code exchange is protected by the client secret.
 - **Redirect URI exact.** Keycloak compares redirect URIs case-sensitively. The path comes from the
   folder name `combodo-hybridauth` in iTop's `extensions/` folder, so it must not contain a version
@@ -350,7 +350,7 @@ it in [LibreChat](#librechat).
 | | Standard Token Exchange | Off |
 | | OAuth 2.0 Device Authorization Grant | Off |
 | | OIDC CIBA Grant | Off |
-| | PKCE method | empty (see below) |
+| | Require PKCE | Off (see below) |
 | Login settings | Root URL | `https://chat.example.com` |
 | | Home URL | `https://chat.example.com/` |
 | | Valid redirect URIs | `https://chat.example.com/oauth/openid/callback` (exactly this, no wildcard) |
@@ -358,7 +358,7 @@ it in [LibreChat](#librechat).
 | | Web origins | empty (LibreChat calls Keycloak from the server, not from the browser) |
 
 The reasons are the same as for the [`itop` client](#keycloak-client-for-itop): authorization code
-flow only, exact redirect URI. **PKCE method empty** means Keycloak accepts a login with or without
+flow only, exact redirect URI. **Require PKCE** off means Keycloak accepts a login with or without
 PKCE. LibreChat sends PKCE (`S256`) when `OPENID_USE_PKCE=true`, and the client secret protects the
 code exchange either way.
 
@@ -404,7 +404,7 @@ OPENID_USE_PKCE=true
 - `OPENID_CALLBACK_URL` is a path. LibreChat puts `DOMAIN_SERVER` in front of it, which must give
   exactly the **Valid redirect URI** of the `librechat` client.
 - `OPENID_USE_PKCE=true` adds PKCE (`S256`) on top of the client secret. Keycloak accepts it with
-  **PKCE method** left empty on the `librechat` client.
+  **Require PKCE** off on the `librechat` client.
 - If only Keycloak users should use LibreChat, also set `ALLOW_REGISTRATION=false`. Keep
   `ALLOW_EMAIL_LOGIN` as it is if you need a local LibreChat admin account.
 
@@ -478,8 +478,8 @@ modelSpecs:
 ```
 
 Users who pick **iTop assistant** in the model menu have the `itop` server switched on in the chat.
-Users of other models can switch it on themselves under **MCP Servers** in the chat input. Use a
-model that supports tool calls. If `modelSpecs` already exists, add the entry to its `list`.
+Users of other models can switch it on themselves in the **+** menu of the chat input, section
+**MCP Servers**. Use a model that supports tool calls. If `modelSpecs` already exists, add the entry to its `list`.
 
 **Option: iTop assistant preselected.** To start every new chat with the iTop assistant and the
 `itop` server switched on, without a click, add three keys (LibreChat
@@ -498,8 +498,8 @@ modelSpecs:
       # ... label, description, preset and mcpServers as above ...
 ```
 
-Users can still pick another model, switch the `itop` server off for a chat under **MCP Servers**,
-and switch it on again. With `enforce: true` they could use only the listed model specs.
+Users can still pick another model, switch the `itop` server off for a chat (the **×** on its chip
+in the chat input), and switch it on again. With `enforce: true` they could use only the listed model specs.
 
 ### iTop: allow LibreChat's callback
 
@@ -634,13 +634,16 @@ name. On the first login, LibreChat creates the account.
 
 ### 6. Connecting the `itop` server opens the iTop consent page
 
-In LibreChat, open **MCP Servers** in the chat input (or pick the **iTop assistant** model) and
-click **Connect** next to **iTop**.
+In LibreChat, click the **MCP Settings** icon in the left bar. The **MCP Servers** panel lists
+**iTop** with an orange dot (not connected). Click the **Connect** icon (the plug) next to it, then
+**Continue with OAuth** in the **Connect itop** dialog. (Asking the **iTop assistant** a question
+before connecting shows a **Sign-in** button in the chat, which starts the same flow.)
 
 **Expected:** a new browser tab with iTop's login page. Click **Sign in with Keycloak**. With the
 Keycloak session from check 5 you go straight to the altioo-oauth-server **consent page**, naming
-**LibreChat MCP Client** and "iTop assistant". After consent, LibreChat shows
-**Authentication Successful**, and **iTop** shows **Connected** under **MCP Servers**.
+**LibreChat MCP Client** and "iTop assistant". After consent, LibreChat
+closes the tab, and the dot next to **iTop** in the **MCP Servers** panel turns green
+(**Connected**).
 
 **If not:**
 

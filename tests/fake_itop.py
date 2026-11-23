@@ -35,6 +35,20 @@ class ReceivedRequest:
         return self.operation.get("key") if self.name == "core/get" else None
 
 
+# Attributes per class, as in iTop's standard data model, for the classes whose field lists the
+# server hard-codes. Like iTop, the fake refuses any other attribute in output_fields for these
+# classes. Ticket itself has no public_log and no status: only some subclasses do.
+_TICKET_FIELDS = {"ref", "title", "description", "operational_status", "caller_id_friendlyname",
+                  "agent_id_friendlyname", "team_id_friendlyname", "org_id_friendlyname", "start_date",
+                  "last_update", "private_log", "friendlyname", "finalclass"}
+CLASS_FIELDS = {
+    "Ticket": _TICKET_FIELDS,
+    "UserRequest": _TICKET_FIELDS | {"status", "priority", "public_log"},
+    "Incident": _TICKET_FIELDS | {"status", "priority", "public_log"},
+    "Change": _TICKET_FIELDS | {"status"},
+}
+
+
 @dataclass
 class FakeITop:
     valid_tokens: set[str] = field(default_factory=set)
@@ -56,6 +70,10 @@ class FakeITop:
     errors_from_request: int = 0
     # ... and, when set, only up to this many requests in total (1 = the token check)
     errors_until_request: int | None = None
+    # real class of the ticket that "SELECT Ticket ..." finds (iTop answers with the object's own class)
+    ticket_class: str = "UserRequest"
+    # False: core/get on ticket classes finds nothing
+    ticket_found: bool = True
 
     def reset(self) -> None:
         self.valid_tokens.clear()
@@ -67,6 +85,8 @@ class FakeITop:
         self.delay = 0.0
         self.errors_from_request = 0
         self.errors_until_request = None
+        self.ticket_class = "UserRequest"
+        self.ticket_found = True
 
     def core_gets(self) -> list[ReceivedRequest]:
         return [r for r in self.requests if r.name == "core/get"]
@@ -96,7 +116,21 @@ class FakeITop:
             if errors_on and self.core_get_error and cls != "Person":
                 code, message = self.core_get_error
                 return JSONResponse({"code": code, "message": message, "objects": None})
-            fields = {"friendlyname": self.person_name} if cls == "Person" else {"ref": "R-000001", "title": "Test"}
+            if cls == "Person":
+                fields = {"friendlyname": self.person_name}
+            elif cls in CLASS_FIELDS:
+                wanted = [f for f in str(op.get("output_fields", "*")).split(",") if f and f != "*"]
+                unknown = [f for f in wanted if f not in CLASS_FIELDS[cls]]
+                if unknown:
+                    return JSONResponse({"code": 100, "objects": None,
+                                         "message": f"Error: output_fields: invalid attribute code '{unknown[0]}'"})
+                if not self.ticket_found:
+                    return JSONResponse({"code": 0, "message": "Found: 0", "objects": None})
+                if cls == "Ticket":
+                    cls = self.ticket_class
+                fields = {f: f"<{f}>" for f in wanted} or {"ref": "R-000001", "title": "Test"}
+            else:
+                fields = {"ref": "R-000001", "title": "Test"}
             return JSONResponse({"code": 0, "message": "Found: 1",
                                  "objects": {f"{cls}::1": {"code": 0, "message": "", "class": cls, "key": "1", "fields": fields}}})
         return JSONResponse({"code": 100, "message": "Unsupported operation"})
