@@ -174,6 +174,39 @@ mcp.settings.transport_security = TransportSecuritySettings(
 )
 
 
+class _LowercaseHostOrigin:
+    """Schreibt Host- und Origin-Header in Kleinbuchstaben, bevor das SDK sie prueft.
+
+    Hostnamen und Schema sind case-insensitiv, der Vergleich im SDK (TransportSecurityMiddleware)
+    aber nicht: "MCP.Example.com" bekaeme sonst 421. CONFIG.public_hosts/public_origin sind schon
+    klein, ein Origin hat keinen Pfad, also aendert das Kleinschreiben nichts an der Bedeutung.
+    """
+
+    _HEADERS = (b"host", b"origin")
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] in ("http", "websocket"):
+            headers = [(k, v.lower() if k in self._HEADERS else v) for k, v in scope["headers"]]
+            scope = {**scope, "headers": headers}
+        await self.app(scope, receive, send)
+
+
+# Gilt fuer mcp.run() (ruft self.streamable_http_app()) und fuer die Tests, die die App direkt holen.
+_sdk_streamable_http_app = mcp.streamable_http_app
+
+
+def _streamable_http_app():  # noqa: ANN202  (Starlette, wie im SDK)
+    app = _sdk_streamable_http_app()
+    app.add_middleware(_LowercaseHostOrigin)
+    return app
+
+
+mcp.streamable_http_app = _streamable_http_app
+
+
 def _audit(tool: str, args: dict[str, Any], user: str, ok: bool, info: str = "") -> None:
     AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
     entry = {

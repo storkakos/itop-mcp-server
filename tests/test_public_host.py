@@ -13,10 +13,12 @@ from fake_itop import free_port
 from test_config import start_server  # noqa: F401  (fixture)
 
 
-def _call_whoami(base_url: str, host: str) -> httpx.Response:
+def _call_whoami(base_url: str, host: str, origin: str | None = None) -> httpx.Response:
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "whoami", "arguments": {}}}
     headers = {"Accept": "application/json, text/event-stream", "Authorization": f"Bearer {VALID_TOKEN}",
                "Host": host}
+    if origin is not None:
+        headers["Origin"] = origin
     return httpx.post(f"{base_url}/mcp", json=body, headers=headers, timeout=30)
 
 
@@ -36,6 +38,36 @@ def test_unrelated_host_is_refused_with_421(mcp_server, itop, host):
     r = _call_whoami(mcp_server, host)
 
     assert r.status_code == 421
+    assert not itop.core_gets()
+
+
+@pytest.mark.parametrize("host", ["MCP.Example.TEST", "Mcp.Example.Test:443"])
+def test_public_host_in_other_letter_case_is_accepted(mcp_server, itop, host):
+    r = _call_whoami(mcp_server, host)
+
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("host", ["EVIL.test", "MCP.Example.TEST:8443"])
+def test_unrelated_host_in_capitals_is_still_refused_with_421(mcp_server, itop, host):
+    r = _call_whoami(mcp_server, host)
+
+    assert r.status_code == 421
+    assert not itop.core_gets()
+
+
+@pytest.mark.parametrize("origin", ["https://mcp.example.test", "HTTPS://MCP.Example.Test"])
+def test_public_origin_is_accepted_in_any_letter_case(mcp_server, itop, origin):
+    r = _call_whoami(mcp_server, "mcp.example.test", origin)
+
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("origin", ["https://evil.test", "http://mcp.example.test", "https://mcp.example.test:8443"])
+def test_foreign_origin_is_refused_with_403(mcp_server, itop, origin):
+    r = _call_whoami(mcp_server, "mcp.example.test", origin)
+
+    assert r.status_code == 403
     assert not itop.core_gets()
 
 
@@ -59,6 +91,25 @@ def test_resource_url_with_explicit_port(start_server, itop):  # noqa: F811
     assert _call_whoami(server.base_url, f"localhost:{port}").status_code == 200
     assert _call_whoami(server.base_url, "mcp.customer.test").status_code == 421
     assert _call_whoami(server.base_url, "mcp.customer.test:9999").status_code == 421
+    assert _call_whoami(server.base_url, "mcp.customer.test:8443", "https://mcp.customer.test:8443").status_code == 200
+    assert _call_whoami(server.base_url, "mcp.customer.test:8443", "https://mcp.customer.test").status_code == 403
+
+
+@pytest.mark.parametrize(("resource_url", "public_host", "default_port", "origin"), [
+    ("https://mcp.customer.test:443/mcp", "mcp.customer.test", 443, "https://mcp.customer.test"),
+    ("http://mcp.customer.test:80/mcp", "mcp.customer.test", 80, "http://mcp.customer.test"),
+], ids=["https-443", "http-80"])
+def test_resource_url_with_default_port_behaves_like_url_without_port(start_server, itop, resource_url,  # noqa: F811
+                                                                      public_host, default_port, origin):
+    server = start_server(ITOP_BASE_URL=itop.base_url, MCP_RESOURCE_URL=resource_url, MCP_HOST="127.0.0.1")
+
+    for host in (public_host, f"{public_host}:{default_port}"):
+        r = _call_whoami(server.base_url, host)
+        assert r.status_code == 200, (host, r.text)
+        assert "Max Muster" in r.json()["result"]["content"][0]["text"]
+    assert _call_whoami(server.base_url, public_host, origin).status_code == 200
+    assert _call_whoami(server.base_url, public_host, f"{origin}:{default_port}").status_code == 403
+    assert _call_whoami(server.base_url, f"{public_host}:8443").status_code == 421
 
 
 # --- MCP_RESOURCE_URL must name a host -------------------------------------------------------

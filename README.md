@@ -129,6 +129,10 @@ terminates TLS on the public host name from `MCP_RESOURCE_URL` and forwards to t
   `MCP_RESOURCE_URL`) and loopback. A request with any other host gets `401` without a token and
   `421 Misdirected Request` with a valid one. Likewise, an `Origin` header (sent by browser-based
   clients) must be the origin of `MCP_RESOURCE_URL` or loopback, otherwise the request gets `403`.
+  Letter case does not matter, and the default port (`443` for `https`, `80` for `http`) may be
+  present or left out, both in the `Host` header and in `MCP_RESOURCE_URL` (which must still match
+  the `itop-mcp` resource in iTop character for character). A non-default port, as
+  in `https://mcp.example.com:8443/mcp`, must be in the `Host` header (`mcp.example.com:8443`).
 - pass the `Authorization` header through unchanged
 
 nginx:
