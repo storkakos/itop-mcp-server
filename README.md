@@ -342,7 +342,20 @@ More checks with expected output: [check list](docs/setup/itop-prerequisites.md#
 
 The tests run without Docker and without a real iTop: they start the server against a small fake
 iTop and talk to it over HTTP like an MCP client. They need Python 3.13 on Linux (`requirements.lock`
-is resolved for Linux); on Windows, run them in a Linux container or VM.
+is resolved for Linux).
+
+On the Windows dev machine, never run them locally: one command copies the working tree
+(uncommitted changes included) to the test VM, runs pytest there in a throwaway container, shows the
+result and cleans up. Run it from Git Bash; arguments go to pytest, the exit code is pytest's:
+
+```sh
+bash scripts/test-on-vm.sh
+bash scripts/test-on-vm.sh tests/test_config.py -x
+```
+
+See [docs/agents/test-vm.md](docs/agents/test-vm.md) for the VM, run names and cleanup.
+
+On a Linux machine, run them directly:
 
 ```sh
 python -m venv .venv
