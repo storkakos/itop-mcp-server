@@ -22,6 +22,11 @@ services:
       - "127.0.0.1:${MCP_PUBLISH_PORT:-8130}:8130"
     volumes:
       - ${MCP_LOG_DIR:-./logs}:/data/logs
+      # Internal CA (only if iTop's certificate comes from your own certificate authority):
+      # mount the CA bundle (PEM) read-only and set SSL_CERT_FILE=/etc/itop-mcp/ca.pem in .env.
+      # Certificate verification stays on. The file must be readable by UID 10001 (e.g. mode 644).
+      # To keep compose.yaml unchanged for `git pull`, put this line into a compose.override.yaml.
+      # - ./certs/internal-ca.pem:/etc/itop-mcp/ca.pem:ro
     read_only: true
     tmpfs:
       - /tmp
