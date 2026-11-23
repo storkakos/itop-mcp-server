@@ -101,16 +101,22 @@ def main() -> None:
     """Standalone fake iTop for the container smoke test (scripts/smoke-test.sh).
 
     FAKE_ITOP_TOKENS: comma-separated tokens to accept; FAKE_ITOP_PORT: listen port (default 8080).
+    FAKE_ITOP_SSL_CERTFILE / FAKE_ITOP_SSL_KEYFILE: serve HTTPS with this certificate and key.
     """
     import os
 
     itop = FakeITop(valid_tokens={t for t in os.environ.get("FAKE_ITOP_TOKENS", "").split(",") if t})
-    uvicorn.run(itop.app(), host="0.0.0.0", port=int(os.environ.get("FAKE_ITOP_PORT", "8080")), log_level="warning")
+    uvicorn.run(itop.app(), host="0.0.0.0", port=int(os.environ.get("FAKE_ITOP_PORT", "8080")), log_level="warning",
+                ssl_certfile=os.environ.get("FAKE_ITOP_SSL_CERTFILE") or None,
+                ssl_keyfile=os.environ.get("FAKE_ITOP_SSL_KEYFILE") or None)
 
 
-def serve_in_thread(app, port: int) -> uvicorn.Server:
-    """Start an ASGI app with uvicorn on 127.0.0.1:<port> in a daemon thread and wait until it is up."""
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+def serve_in_thread(app, port: int, **uvicorn_options) -> uvicorn.Server:
+    """Start an ASGI app with uvicorn on 127.0.0.1:<port> in a daemon thread and wait until it is up.
+
+    uvicorn_options go to uvicorn.Config, e.g. ssl_certfile/ssl_keyfile to serve HTTPS.
+    """
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", **uvicorn_options))
     threading.Thread(target=server.run, daemon=True).start()
     deadline = time.monotonic() + 10
     while not server.started:

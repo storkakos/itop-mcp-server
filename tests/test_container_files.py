@@ -53,6 +53,33 @@ def test_env_example_marks_required_values_and_sets_them():
         assert re.search(rf"^# REQUIRED\..*\n(?:#.*\n)*{var}=\S+", text, re.M), f"{var} not marked REQUIRED"
 
 
+def test_env_example_documents_ssl_cert_file():
+    text = _read(".env.example")
+
+    m = re.search(r"((?:^#.*\n)+)^#SSL_CERT_FILE=(/\S+)\s*$", text, re.M)
+    assert m, "SSL_CERT_FILE (commented, with a container path) missing in .env.example"
+    comment, path = m.groups()
+    assert "CA" in comment
+    # the documented path is where the compose example mounts the bundle
+    assert re.search(rf"^\s*#\s*- \S+:{re.escape(path)}:ro\s*$", _read("compose.yaml"), re.M)
+
+
+def test_compose_has_commented_read_only_ca_mount_and_ssl_cert_file():
+    compose = _read("compose.yaml")
+
+    # commented out: nothing customer-specific is active by default
+    assert re.search(r"^\s*#\s*- \S+:/\S+:ro\s*$", compose, re.M), "no commented read-only CA mount"
+    assert re.search(r"^\s*#.*SSL_CERT_FILE", compose, re.M)
+    assert not re.search(r"^\s*[^#\s].*SSL_CERT_FILE", compose, re.M), "SSL_CERT_FILE must not be active"
+
+
+def test_image_contains_no_ca_bundle():
+    dockerfile = _read("Dockerfile")
+
+    assert "SSL_CERT_FILE" not in dockerfile
+    assert not re.search(r"\.(pem|crt)\b|update-ca-certificates", dockerfile)
+
+
 def test_lock_file_pins_the_pyproject_dependencies_exactly():
     project = tomllib.loads(_read("pyproject.toml"))["project"]
     lock = _pins(_read("requirements.lock").splitlines())
