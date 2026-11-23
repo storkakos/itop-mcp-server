@@ -34,7 +34,7 @@ def _ok(response) -> str:
 
 @pytest.fixture
 def server(mcp_server):
-    return importlib.import_module("itop_mcp_poc.server")
+    return importlib.import_module("itop_mcp_server.server")
 
 
 def _call_in_process(server, tool: str, arguments: dict, cancel_after: float | None = None) -> bool:
