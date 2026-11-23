@@ -6,7 +6,9 @@ Tests act like an MCP client (JSON-RPC POSTs to /mcp with a Bearer token, GETs o
 from __future__ import annotations
 
 import importlib
+import json
 import os
+from pathlib import Path
 
 import httpx
 import pytest
@@ -79,3 +81,25 @@ def client(mcp_server) -> MCPClient:
     c = MCPClient(mcp_server)
     yield c
     c.http.close()
+
+
+@pytest.fixture
+def audit(mcp_server):
+    """Collects the audit lines written during the test."""
+    return AuditLog(Path(os.environ["MCP_AUDIT_LOG"]))
+
+
+class AuditLog:
+    def __init__(self, path: Path):
+        self.path = path
+        self.start = path.stat().st_size if path.exists() else 0
+
+    def raw(self) -> str:
+        if not self.path.exists():
+            return ""
+        with self.path.open("rb") as f:
+            f.seek(self.start)
+            return f.read().decode("utf-8")
+
+    def entries(self) -> list[dict]:
+        return [json.loads(line) for line in self.raw().splitlines()]

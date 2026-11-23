@@ -12,12 +12,14 @@ Unterschied zum Upstream:
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
 import os
 import re
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +62,17 @@ def _redact(text: str) -> str:
     return re.sub(r"[A-Za-z0-9_\-]{32,}", "***", text)
 
 
+# Ergebnis jeder iTop-Anfrage waehrend eines umhuellten Upstream-Tools: (ok, Info).
+# Die Upstream-Tools fangen Fehler selbst ab und liefern nur Text, daher kommt das ok-Flag von hier.
+_itop_calls: ContextVar[list[tuple[bool, str]] | None] = ContextVar("itop_calls", default=None)
+
+
+def _record_itop_call(ok: bool, info: str) -> None:
+    calls = _itop_calls.get()
+    if calls is not None:
+        calls.append((ok, info))
+
+
 class ITopTokenClient(upstream.ITopClient):
     """iTop-REST-Client mit dem persoenlichen Token des Aufrufers (pro Anfrage neu erzeugt)."""
 
@@ -79,6 +92,15 @@ class ITopTokenClient(upstream.ITopClient):
             limit = operation_data.get("limit")
             limit = limit if isinstance(limit, int) and limit > 0 else MAX_ROWS
             operation_data = {**operation_data, "limit": min(limit, MAX_ROWS)}
+        try:
+            result = await self._post(operation_data, headers)
+        except Exception as e:
+            _record_itop_call(False, str(e))
+            raise
+        _record_itop_call(result.get("code") == 0, str(result.get("message", "")))
+        return result
+
+    async def _post(self, operation_data: dict, headers: dict[str, str]) -> dict:
         data = {"version": self.version, "json_data": json.dumps(operation_data)}
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
@@ -253,6 +275,33 @@ async def oql_query(oql: str, fields: str = "friendlyname", limit: int = 20) -> 
     res = await _get(oql.strip(), fields.replace(" ", ""), limit)
     _audit("oql_query", {"oql": oql, "fields": fields}, await _current_user(), res.get("code") == 0, str(res.get("message", "")))
     return _format(res)
+
+
+# Upstream-Tools: beim Registrieren umhuellt (Upstream-Modul bleibt unveraendert), damit auch sie
+# genau eine Audit-Zeile je Aufruf schreiben. Name, Parameter-Schema und Ergebnis bleiben gleich.
+UPSTREAM_TOOLS = ("smart_query_v2", "list_operations")
+
+
+def _audited(name: str, fn):
+    @functools.wraps(fn)
+    async def wrapper(**kwargs: Any) -> Any:
+        calls: list[tuple[bool, str]] = []
+        reset = _itop_calls.set(calls)
+        try:
+            return await fn(**kwargs)
+        except Exception as e:
+            calls.append((False, str(e)))
+            raise
+        finally:
+            _itop_calls.reset(reset)
+            failed = [info for ok, info in calls if not ok]
+            _audit(name, kwargs, await _current_user(), bool(calls) and not failed, failed[0] if failed else "")
+    return wrapper
+
+
+for _name in UPSTREAM_TOOLS:
+    _tool = mcp._tool_manager.get_tool(_name)
+    _tool.fn = _audited(_name, _tool.fn)
 
 
 def main() -> None:

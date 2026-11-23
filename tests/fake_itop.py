@@ -44,12 +44,19 @@ class FakeITop:
     core_get_error: tuple[int, str] | None = None
     # when set, every request gets this HTTP status (simulates a broken iTop)
     http_status: int | None = None
+    # (code, message) returned for list_operations, e.g. to simulate an iTop error answer
+    list_operations_error: tuple[int, str] | None = None
+    # the error settings above only apply from this request on (0 = the token check),
+    # so a test can let the token check pass and make the tool's own call fail
+    errors_from_request: int = 0
 
     def reset(self) -> None:
         self.valid_tokens.clear()
         self.requests.clear()
         self.core_get_error = None
         self.http_status = None
+        self.list_operations_error = None
+        self.errors_from_request = 0
 
     def core_gets(self) -> list[ReceivedRequest]:
         return [r for r in self.requests if r.name == "core/get"]
@@ -59,16 +66,20 @@ class FakeITop:
         op = json.loads(form.get("json_data", "{}"))
         token = request.headers.get("auth-token")
         self.requests.append(ReceivedRequest(token, dict(request.query_params), form, op))
+        errors_on = len(self.requests) > self.errors_from_request
 
-        if self.http_status is not None:
+        if errors_on and self.http_status is not None:
             return JSONResponse({"error": "broken"}, status_code=self.http_status)
         if token not in self.valid_tokens:
             return JSONResponse({"code": 1, "message": "Error: Invalid login"})
         if op.get("operation") == "list_operations":
+            if errors_on and self.list_operations_error:
+                code, message = self.list_operations_error
+                return JSONResponse({"code": code, "message": message})
             return JSONResponse({"code": 0, "message": "Operations: 1", "version": "1.3", "operations": []})
         if op.get("operation") == "core/get":
             cls = op.get("class") or "Ticket"
-            if self.core_get_error and cls != "Person":
+            if errors_on and self.core_get_error and cls != "Person":
                 code, message = self.core_get_error
                 return JSONResponse({"code": code, "message": message, "objects": None})
             fields = {"friendlyname": self.person_name} if cls == "Person" else {"ref": "R-000001", "title": "Test"}
