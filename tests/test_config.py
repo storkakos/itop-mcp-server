@@ -16,7 +16,7 @@ import httpx
 import pytest
 
 from conftest import VALID_TOKEN
-from itop_mcp_poc.config import load_config
+from itop_mcp_server.config import load_config
 from fake_itop import free_port
 
 RESOURCE_URL = "https://mcp.customer.test/mcp"
@@ -36,7 +36,7 @@ def _start(**config: str) -> subprocess.Popen:
     # Output goes to a temp file, not a pipe: nobody reads the pipe while the server runs, and once
     # its buffer is full the server blocks on logging and stops answering.
     output = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
-    proc = subprocess.Popen([sys.executable, "-m", "itop_mcp_poc.server"], env=_env(**config),
+    proc = subprocess.Popen([sys.executable, "-m", "itop_mcp_server.server"], env=_env(**config),
                             stdout=output, stderr=subprocess.STDOUT, text=True)
     proc.output = output
     return proc
@@ -48,7 +48,7 @@ def _output(proc: subprocess.Popen) -> str:
 
 
 def _run_until_exit(**config: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, "-m", "itop_mcp_poc.server"], env=_env(**config),
+    return subprocess.run([sys.executable, "-m", "itop_mcp_server.server"], env=_env(**config),
                           capture_output=True, text=True, timeout=30)
 
 
@@ -227,7 +227,7 @@ def test_unwritable_audit_log_stops_startup_and_names_it(tmp_path):
 # --- container healthcheck ------------------------------------------------------------------
 
 def _healthcheck(**config: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, "-m", "itop_mcp_poc.healthcheck"], env=_env(**config),
+    return subprocess.run([sys.executable, "-m", "itop_mcp_server.healthcheck"], env=_env(**config),
                           capture_output=True, text=True, timeout=30)
 
 
@@ -255,7 +255,7 @@ def test_healthcheck_ignores_proxy_from_environment(start_server, itop):
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env[name] = dead_proxy
 
-    result = subprocess.run([sys.executable, "-m", "itop_mcp_poc.healthcheck"], env=env,
+    result = subprocess.run([sys.executable, "-m", "itop_mcp_server.healthcheck"], env=env,
                             capture_output=True, text=True, timeout=30)
 
     assert result.returncode == 0, result.stderr

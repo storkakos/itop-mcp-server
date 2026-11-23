@@ -27,7 +27,7 @@ LOG_DIR="$WORK/logs"
 AUDIT="$LOG_DIR/mcp-itop-audit.log"
 CA_DIR="$WORK/ca"
 
-VERSION="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/itop_mcp_poc/__init__.py)"
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/itop_mcp_server/__init__.py)"
 IMAGE="$(sed -n 's/^ *image: *\(itop-mcp-server:[^ ]*\) *$/\1/p' compose.yaml)"
 # Own tag per compose project, so parallel smoke runs on one Docker host don't replace each other's image.
 RUN_IMAGE="$IMAGE-$PROJECT"
@@ -89,7 +89,7 @@ trap 'cleanup $?' EXIT
 
 command -v docker >/dev/null || die "docker not found"
 command -v curl >/dev/null || die "curl not found"
-[ -n "$VERSION" ] || die "no __version__ in src/itop_mcp_poc/__init__.py"
+[ -n "$VERSION" ] || die "no __version__ in src/itop_mcp_server/__init__.py"
 [ -n "$IMAGE" ] || die "no image: line in compose.yaml"
 
 rm -rf "$WORK"
@@ -111,14 +111,14 @@ compose up -d --wait --wait-timeout 120 || die "containers did not become health
 
 echo "== image and container"
 check "image tag matches project version $VERSION" [ "$IMAGE" = "itop-mcp-server:$VERSION" ]
-in_image="$(docker run --rm "$RUN_IMAGE" python -c 'import itop_mcp_poc; print(itop_mcp_poc.__version__)')"
+in_image="$(docker run --rm "$RUN_IMAGE" python -c 'import itop_mcp_server; print(itop_mcp_server.__version__)')"
 check "version inside the image is $VERSION" [ "$in_image" = "$VERSION" ]
 cid="$(compose ps -q "$SERVICE")"
 check "container is healthy" [ "$(docker inspect -f '{{.State.Health.Status}}' "$cid")" = healthy ]
 # Proxy on loopback port 9, where nothing listens: a request sent through it would fail.
 check "healthcheck passes with an unreachable HTTP(S)_PROXY and no NO_PROXY" compose exec -T \
   -e HTTP_PROXY=http://127.0.0.1:9 -e HTTPS_PROXY=http://127.0.0.1:9 -e http_proxy=http://127.0.0.1:9 \
-  -e https_proxy=http://127.0.0.1:9 -e NO_PROXY= -e no_proxy= "$SERVICE" python -m itop_mcp_poc.healthcheck
+  -e https_proxy=http://127.0.0.1:9 -e NO_PROXY= -e no_proxy= "$SERVICE" python -m itop_mcp_server.healthcheck
 check "restart policy unless-stopped" [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$cid")" = unless-stopped ]
 check "root filesystem is read-only" [ "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$cid")" = true ]
 check "runs as non-root user" [ "$(compose exec -T "$SERVICE" id -u | tr -d '\r')" != 0 ]

@@ -60,7 +60,7 @@ def test_valid_token_is_accepted_without_a_resource_check(client, itop):
     # The server switches the MCP SDK's RFC 8707 resource check off explicitly: iTop does not tell
     # which resource a token was issued for, so the verifier reports none. If an SDK update turned
     # the check on (the 3.0 default), every valid iTop token would be refused here with 401.
-    from itop_mcp_poc.server import mcp
+    from itop_mcp_server.server import mcp
 
     r = client.call_tool("whoami")
 

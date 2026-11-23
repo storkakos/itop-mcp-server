@@ -31,6 +31,6 @@ EXPOSE 8130
 VOLUME ["/data/logs"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["python", "-m", "itop_mcp_poc.healthcheck"]
+    CMD ["python", "-m", "itop_mcp_server.healthcheck"]
 
 CMD ["itop-mcp-server"]

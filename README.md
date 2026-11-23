@@ -337,5 +337,5 @@ and checks it from outside, without touching your `.env` or `./logs`:
 scripts/smoke-test.sh
 ```
 
-Releasing: set `__version__` in `src/itop_mcp_poc/__init__.py` and the image tag in `compose.yaml`
+Releasing: set `__version__` in `src/itop_mcp_server/__init__.py` and the image tag in `compose.yaml`
 to the same version (a test checks this), run both test suites, then tag `vX.Y.Z`.

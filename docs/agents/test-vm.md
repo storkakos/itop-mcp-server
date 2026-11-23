@@ -82,7 +82,7 @@ The script tags its image `itop-mcp-server:<version>-$RUN`, so it never replaces
 Remove only what you created yourself, and nothing else:
 
 ```sh
-$SSH "docker rmi itop-mcp-server:\$(sed -n 's/^__version__ = \"\(.*\)\"\$/\1/p' $DIR/src/itop_mcp_poc/__init__.py)-$RUN; rm -rf $DIR"
+$SSH "docker rmi itop-mcp-server:\$(sed -n 's/^__version__ = \"\(.*\)\"\$/\1/p' $DIR/src/itop_mcp_server/__init__.py)-$RUN; rm -rf $DIR"
 ```
 
 If a run was killed halfway, also take its containers and networks down first: `$SSH "docker compose -p $RUN down --volumes --remove-orphans"` (works from any folder, by project name alone), and `$SSH "docker rm -f $RUN-pytest"` for a pytest container.

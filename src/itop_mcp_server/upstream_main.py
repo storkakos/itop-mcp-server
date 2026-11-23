@@ -12,7 +12,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 # Initialize FastMCP server
-# PoC-Patch: mcp>=1.2x kennt "description" nicht mehr -> "instructions"
+# Patch: mcp>=1.2x kennt "description" nicht mehr -> "instructions"
 mcp = FastMCP("itop-mcp", instructions="iTop ITSM integration server")
 
 # Configuration

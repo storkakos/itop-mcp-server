@@ -45,7 +45,7 @@ def mcp_server(fake_itop, tmp_path_factory) -> str:
         "MCP_AUDIT_LOG": str(tmp_path_factory.mktemp("logs") / "audit.log"),
     })
     # Configuration is read at import time, so import only after the environment is set.
-    server = importlib.import_module("itop_mcp_poc.server")
+    server = importlib.import_module("itop_mcp_server.server")
     serve_in_thread(server.mcp.streamable_http_app(), port)
     return f"http://127.0.0.1:{port}"
 

@@ -5,7 +5,7 @@
 services:
   itop-mcp-server:
     build: .
-    # Keep this tag equal to __version__ in src/itop_mcp_poc/__init__.py (checked by tests/test_container_files.py).
+    # Keep this tag equal to __version__ in src/itop_mcp_server/__init__.py (checked by tests/test_container_files.py).
     image: itop-mcp-server:0.1.0
     # Always .env for normal use. MCP_ENV_FILE exists only so scripts/smoke-test.sh can run with its
     # own env file; it is not an operator setting. It only changes what the container sees: host-side

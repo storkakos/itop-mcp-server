@@ -11,7 +11,7 @@ requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE", "LICENSE-upstream-itop-mcp"]
 dynamic = ["version"]
-# Pinned exactly as tested in the PoC
+# Pinned exactly: the versions this server is tested with
 dependencies = [
     "httpx==0.28.1",
     "mcp[cli]==1.30.0",
@@ -24,10 +24,10 @@ test = [
 ]
 
 [project.scripts]
-itop-mcp-server = "itop_mcp_poc.server:main"
+itop-mcp-server = "itop_mcp_server.server:main"
 
 [tool.setuptools.dynamic]
-version = { attr = "itop_mcp_poc.__version__" }
+version = { attr = "itop_mcp_server.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

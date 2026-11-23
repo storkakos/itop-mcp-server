@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import itop_mcp_poc
+import itop_mcp_server
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_VARS = ("ITOP_BASE_URL", "MCP_RESOURCE_URL", "ITOP_OAUTH_ISSUER", "ITOP_API_VERSION", "MCP_MAX_ROWS",
@@ -36,7 +36,7 @@ def _pins(lines: list[str]) -> dict[str, str]:
 def test_compose_image_tag_matches_project_version():
     tags = re.findall(r"^\s*image:\s*itop-mcp-server:(\S+)\s*$", _read("compose.yaml"), re.M)
 
-    assert tags == [itop_mcp_poc.__version__]
+    assert tags == [itop_mcp_server.__version__]
 
 
 def test_image_is_based_on_python_313_slim():
@@ -145,7 +145,7 @@ def test_files_read_on_linux_are_pinned_to_lf():
                      if n.endswith((".py", ".sh", ".yaml", ".yml", ".toml", ".lock"))
                      or Path(n).name in ("Dockerfile", ".env.example", ".dockerignore", "LICENSE", "LICENSE-upstream-itop-mcp")]
     assert {"Dockerfile", ".env.example", ".dockerignore", "compose.yaml", "pyproject.toml",
-            "requirements.lock", "scripts/smoke-test.sh", "src/itop_mcp_poc/__init__.py"} <= set(read_on_linux)
+            "requirements.lock", "scripts/smoke-test.sh", "src/itop_mcp_server/__init__.py"} <= set(read_on_linux)
 
     out = subprocess.run(["git", "check-attr", "-z", "eol", "--", *read_on_linux],
                          cwd=ROOT, capture_output=True, check=True).stdout.decode("utf-8").split("\0")
