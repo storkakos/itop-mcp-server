@@ -1,7 +1,8 @@
 """Configuration contract: the server is started as a real process with a given environment.
 
-Checked from outside only: exit code and startup output, the protected-resource metadata,
-and what reaches the fake iTop.
+Checked from outside: exit code and startup output, the protected-resource metadata,
+and what reaches the fake iTop. Only the defaults that would make a server write outside the
+test's temp folders (the audit log under /data) are read from the loaded configuration instead.
 """
 from __future__ import annotations
 
@@ -10,12 +11,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from pathlib import Path
 
 import httpx
 import pytest
 
 from conftest import VALID_TOKEN
+from itop_mcp_poc.config import load_config
 from fake_itop import free_port
 
 RESOURCE_URL = "https://mcp.customer.test/mcp"
@@ -197,34 +198,14 @@ def test_audit_log_goes_to_configured_path(start_server, itop, tmp_path):
 
 
 def test_defaults_for_host_and_audit_log_are_container_friendly():
-    # Without MCP_AUDIT_LOG the server uses /data/logs (the container mount). Outside a container
-    # that folder may or may not be writable, so the server either runs or stops at the audit-log
-    # check; the startup line names the defaults either way. Anything this test creates there is removed.
-    default_log = Path("/data/logs/mcp-itop-audit.log").resolve()
-    existed = {p: p.exists() for p in (default_log, default_log.parent, default_log.parent.parent)}
-    port = free_port()
-    proc = _start(ITOP_BASE_URL="https://itop.customer.test", MCP_RESOURCE_URL=RESOURCE_URL, MCP_PORT=str(port))
-    server = RunningServer(proc, f"http://127.0.0.1:{port}")
-    try:
-        deadline = time.monotonic() + 20
-        while proc.poll() is None:
-            try:
-                server.metadata()
-                break
-            except httpx.TransportError:
-                assert time.monotonic() < deadline, "server did not start"
-                time.sleep(0.1)
-    finally:
-        output = server.stop() if proc.poll() is None else _output(proc)
-        for p, was_there in existed.items():
-            if not was_there and p.is_file():
-                p.unlink()
-            elif not was_there and p.is_dir() and not any(p.iterdir()):
-                p.rmdir()
+    # Read from the loaded configuration, not by starting a server: a server would create the default
+    # audit log under /data (C:\data on Windows), and whether that works depends on the machine.
+    config = load_config({"ITOP_BASE_URL": "https://itop.customer.test", "MCP_RESOURCE_URL": RESOURCE_URL})
 
-    # Listens on all interfaces, and the audit log sits in the data folder, not next to the source code.
-    assert f"0.0.0.0:{port}" in output
-    assert "/data/logs/mcp-itop-audit.log" in output
+    # Listens on all interfaces, and the audit log sits in the data folder (the container mount),
+    # not next to the source code.
+    assert config.host == "0.0.0.0"
+    assert config.audit_log == "/data/logs/mcp-itop-audit.log"
 
 
 def test_unwritable_audit_log_stops_startup_and_names_it(tmp_path):
