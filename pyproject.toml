@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "itop-mcp-server"
+description = "MCP server for iTop: read-only tools, every call runs with the caller's own iTop token"
+requires-python = ">=3.13"
+license-files = ["LICENSE-upstream-itop-mcp"]
+dynamic = ["version"]
+# Pinned exactly as tested in the PoC
+dependencies = [
+    "httpx==0.28.1",
+    "mcp[cli]==1.30.0",
+    "uvicorn==0.54.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==8.4.2",
+]
+
+[project.scripts]
+itop-mcp-server = "itop_mcp_poc.server:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "itop_mcp_poc.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
