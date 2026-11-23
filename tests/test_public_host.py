@@ -1,22 +1,52 @@
 """Requests through the customer's reverse proxy carry the public host name in the Host header.
 
 The host (and port) of MCP_RESOURCE_URL must be accepted; the DNS-rebinding protection stays on
-for every other host. Loopback keeps working for the container healthcheck.
+for every other host. Loopback keeps working for the container healthcheck. The host and origin
+check runs before the token check, on every route, so a refused request never reaches iTop.
 """
 from __future__ import annotations
+
+import re
+import uuid
 
 import httpx
 import pytest
 
-from conftest import VALID_TOKEN
+from conftest import RESOURCE_URL, VALID_TOKEN
 from fake_itop import free_port
 from test_config import start_server  # noqa: F401  (fixture)
+
+PUBLIC_METADATA_URL = "https://mcp.example.test/.well-known/oauth-protected-resource/mcp"
 
 
 def _call_whoami(base_url: str, host: str, origin: str | None = None) -> httpx.Response:
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "whoami", "arguments": {}}}
     headers = {"Accept": "application/json, text/event-stream", "Authorization": f"Bearer {VALID_TOKEN}",
                "Host": host}
+    if origin is not None:
+        headers["Origin"] = origin
+    return httpx.post(f"{base_url}/mcp", json=body, headers=headers, timeout=30)
+
+
+def _resource_metadata_url(response: httpx.Response) -> str:
+    m = re.search(r'resource_metadata="([^"]+)"', response.headers["www-authenticate"])
+    assert m, response.headers["www-authenticate"]
+    return m.group(1)
+
+
+def _fresh_token(itop, valid: bool) -> str:
+    """A token the server has never seen before, so a token check would have to ask iTop."""
+    token = f"fresh-{uuid.uuid4().hex}"
+    if valid:
+        itop.valid_tokens.add(token)
+    return token
+
+
+def _post_mcp(base_url: str, host: str, token: str | None, origin: str | None = None) -> httpx.Response:
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "whoami", "arguments": {}}}
+    headers = {"Accept": "application/json, text/event-stream", "Host": host}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
     if origin is not None:
         headers["Origin"] = origin
     return httpx.post(f"{base_url}/mcp", json=body, headers=headers, timeout=30)
@@ -38,7 +68,7 @@ def test_unrelated_host_is_refused_with_421(mcp_server, itop, host):
     r = _call_whoami(mcp_server, host)
 
     assert r.status_code == 421
-    assert not itop.core_gets()
+    assert itop.requests == []
 
 
 @pytest.mark.parametrize("host", ["MCP.Example.TEST", "Mcp.Example.Test:443"])
@@ -53,7 +83,7 @@ def test_unrelated_host_in_capitals_is_still_refused_with_421(mcp_server, itop, 
     r = _call_whoami(mcp_server, host)
 
     assert r.status_code == 421
-    assert not itop.core_gets()
+    assert itop.requests == []
 
 
 @pytest.mark.parametrize("origin", ["https://mcp.example.test", "HTTPS://MCP.Example.Test"])
@@ -68,7 +98,7 @@ def test_foreign_origin_is_refused_with_403(mcp_server, itop, origin):
     r = _call_whoami(mcp_server, "mcp.example.test", origin)
 
     assert r.status_code == 403
-    assert not itop.core_gets()
+    assert itop.requests == []
 
 
 @pytest.mark.parametrize("loopback", ["localhost", "127.0.0.1"])
@@ -78,6 +108,71 @@ def test_loopback_host_keeps_working(mcp_server, itop, loopback):
     r = _call_whoami(mcp_server, f"{loopback}:{port}")
 
     assert r.status_code == 200, r.text
+
+
+# --- the host and origin check comes before the token check ----------------------------------
+
+TOKEN_KINDS = ["valid-token", "invalid-token", "no-token"]
+
+
+def _token_of_kind(itop, kind: str) -> str | None:
+    return None if kind == "no-token" else _fresh_token(itop, valid=kind == "valid-token")
+
+
+@pytest.mark.parametrize("kind", TOKEN_KINDS)
+def test_foreign_host_gets_421_before_any_token_check(mcp_server, itop, kind):
+    r = _post_mcp(mcp_server, "evil.test", _token_of_kind(itop, kind))
+
+    assert r.status_code == 421
+    assert r.text == "Invalid Host header"
+    assert "www-authenticate" not in r.headers
+    assert itop.requests == []
+
+
+@pytest.mark.parametrize("kind", TOKEN_KINDS)
+def test_foreign_origin_gets_403_before_any_token_check(mcp_server, itop, kind):
+    r = _post_mcp(mcp_server, "mcp.example.test", _token_of_kind(itop, kind), origin="https://evil.test")
+
+    assert r.status_code == 403
+    assert r.text == "Invalid Origin header"
+    assert "www-authenticate" not in r.headers
+    assert itop.requests == []
+
+
+@pytest.mark.parametrize("kind", TOKEN_KINDS)
+def test_metadata_with_foreign_host_gets_421(mcp_server, itop, kind):
+    token = _token_of_kind(itop, kind)
+    headers = {"Host": "evil.test", **({"Authorization": f"Bearer {token}"} if token else {})}
+
+    r = httpx.get(f"{mcp_server}/.well-known/oauth-protected-resource/mcp", headers=headers, timeout=10)
+
+    assert r.status_code == 421
+    assert RESOURCE_URL not in r.text
+    assert itop.requests == []
+
+
+def test_metadata_with_foreign_origin_gets_403(mcp_server, itop):
+    r = httpx.get(f"{mcp_server}/.well-known/oauth-protected-resource/mcp",
+                  headers={"Host": "mcp.example.test", "Origin": "https://evil.test"}, timeout=10)
+
+    assert r.status_code == 403
+    assert itop.requests == []
+
+
+@pytest.mark.parametrize("host", ["mcp.example.test", "loopback"])
+def test_allowed_host_still_gets_the_401_challenge_and_works_with_a_new_token(mcp_server, itop, host):
+    if host == "loopback":
+        host = f"127.0.0.1:{mcp_server.rsplit(':', 1)[1]}"
+
+    challenge = _post_mcp(mcp_server, host, None)
+    rejected = _post_mcp(mcp_server, host, _fresh_token(itop, valid=False))
+    accepted = _post_mcp(mcp_server, host, _fresh_token(itop, valid=True))
+
+    assert challenge.status_code == 401
+    assert _resource_metadata_url(challenge) == PUBLIC_METADATA_URL
+    assert rejected.status_code == 401
+    assert accepted.status_code == 200, accepted.text
+    assert "Max Muster" in accepted.json()["result"]["content"][0]["text"]
 
 
 # --- MCP_RESOURCE_URL with an explicit port (separate server process) ------------------------
