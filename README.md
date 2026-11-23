@@ -233,10 +233,10 @@ version for new or changed settings in `.env.example`.
 
 ## Audit log
 
-Tool calls append one line each to `logs/mcp-itop-audit.log` on the host (`MCP_LOG_DIR`), also for
-calls the server refuses before they reach iTop. Exception in this version: if iTop is unreachable
-or answers with an HTTP error, `search_tickets`, `get_ticket` and `oql_query` write no line (the
-error shows in `docker logs`). The file survives container recreation and updates.
+Every tool call appends exactly one line to `logs/mcp-itop-audit.log` on the host (`MCP_LOG_DIR`):
+also calls the server refuses before they reach iTop, calls where iTop is unreachable or answers
+with an error, and calls that are cancelled while they run (for example when the server shuts
+down). The file survives container recreation and updates.
 
 ```json
 {"ts": "2026-11-23T09:14:02", "user": "Jane Doe", "token": "3f9a1c0e7b2d", "tool": "search_tickets", "args": {"text": "printer", "status": "", "class": "UserRequest"}, "ok": true, "info": ""}
@@ -245,12 +245,25 @@ error shows in `docker logs`). The file survives container recreation and update
 | Field | Meaning |
 |---|---|
 | `ts` | Time of the call in the container's time zone (UTC unless you set `TZ`) |
-| `user` | iTop person the token belongs to; `?` for refused input (which never reaches iTop) or when iTop names no person for the token |
+| `user` | iTop person the token belongs to; `?` for refused input (which never reaches iTop), for a cancelled call, or when iTop does not name a person for the token (also when the lookup fails because iTop is unreachable) |
 | `token` | Short, non-reversible hash of the token, to tell sessions apart. Never the token itself. |
 | `tool` | Tool name |
 | `args` | Tool arguments; long token-like strings are masked as `***` |
-| `ok` | `true` if iTop answered without error |
-| `info` | Refusal message, or iTop's error message for `oql_query` and the upstream tools (empty for the others); shortened and masked like `args` |
+| `ok` | `true` only if the call reached iTop and **every** iTop request of the call was answered without error, see below |
+| `info` | Empty when `ok` is `true`. Otherwise why not: `abgelehnt: …` (refused input), iTop's error message or the connection error (`iTop HTTP 500`, `iTop nicht erreichbar: …`, `iTop lieferte kein JSON …`), `kein iTop-Aufruf: …` (the tool answered without asking iTop) or `abgebrochen` (cancelled). Shortened and masked like `args`. |
+
+How `ok` is decided, for every tool alike:
+
+- **Refused input** (for example an `oql_query` that is not a single `SELECT`): `ok` is `false`.
+- **No iTop request at all** (for example a `smart_query_v2` comparison the tool cannot run): `ok`
+  is `false`, and `info` starts with `kein iTop-Aufruf:` followed by the first line of the answer.
+- **One of several iTop requests failed** (for example one half of a `smart_query_v2`
+  comparison): `ok` is `false` and `info` names the first error, even if the tool still answered.
+  The server cannot tell whether a tool recovered from the error or only wrote it into its text.
+- **`whoami`**: the person lookup is the tool's only iTop request, so a failed lookup gives `ok`
+  `false` (and `user` `?`).
+- **Cancelled:** `ok` is `false`, `info` is `abgebrochen`. The iTop request may already have run.
+- The lookup of `user` for the audit line is a separate iTop request and does not count.
 
 **Rotation is your job.** The server only appends and never rotates or deletes the file. Use
 logrotate with `copytruncate` (the server keeps no file handle open between calls, but

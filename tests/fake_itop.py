@@ -5,6 +5,7 @@ so tests can check what actually reached iTop.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import threading
@@ -14,7 +15,7 @@ from dataclasses import dataclass, field
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
 
@@ -46,9 +47,15 @@ class FakeITop:
     http_status: int | None = None
     # (code, message) returned for list_operations, e.g. to simulate an iTop error answer
     list_operations_error: tuple[int, str] | None = None
-    # the error settings above only apply from this request on (0 = the token check),
-    # so a test can let the token check pass and make the tool's own call fail
+    # when True, answer with an HTML page instead of JSON (like iTop's login page)
+    html_answer: bool = False
+    # seconds to wait before answering (simulates a slow iTop)
+    delay: float = 0.0
+    # the settings above only apply from this request on (0 = the token check),
+    # so a test can let the token check pass and make the tool's own call fail ...
     errors_from_request: int = 0
+    # ... and, when set, only up to this many requests in total (1 = the token check)
+    errors_until_request: int | None = None
 
     def reset(self) -> None:
         self.valid_tokens.clear()
@@ -56,20 +63,27 @@ class FakeITop:
         self.core_get_error = None
         self.http_status = None
         self.list_operations_error = None
+        self.html_answer = False
+        self.delay = 0.0
         self.errors_from_request = 0
+        self.errors_until_request = None
 
     def core_gets(self) -> list[ReceivedRequest]:
         return [r for r in self.requests if r.name == "core/get"]
 
-    async def _rest(self, request: Request) -> JSONResponse:
+    async def _rest(self, request: Request) -> Response:
         form = {k: str(v) for k, v in (await request.form()).items()}
         op = json.loads(form.get("json_data", "{}"))
         token = request.headers.get("auth-token")
         self.requests.append(ReceivedRequest(token, dict(request.query_params), form, op))
-        errors_on = len(self.requests) > self.errors_from_request
+        errors_on = self.errors_from_request < len(self.requests) <= (self.errors_until_request or len(self.requests))
 
+        if errors_on and self.delay:
+            await asyncio.sleep(self.delay)
         if errors_on and self.http_status is not None:
             return JSONResponse({"error": "broken"}, status_code=self.http_status)
+        if errors_on and self.html_answer:
+            return HTMLResponse("<html><body>iTop login</body></html>")
         if token not in self.valid_tokens:
             return JSONResponse({"code": 1, "message": "Error: Invalid login"})
         if op.get("operation") == "list_operations":
