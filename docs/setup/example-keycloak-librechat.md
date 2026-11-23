@@ -139,12 +139,50 @@ hybridauth identifies the user by the **email** that Keycloak returns. So:
   the **Client scopes** tab of the `itop` client if logins fail with a missing email.
 - **Users must not be able to choose their own email.** Whoever can set an email in Keycloak can log
   into iTop as the iTop user with that login. hybridauth 2.1.1 does not check `email_verified`.
-  In **Realm settings**:
-  - **Login** → **Duplicate emails**: Off (the default).
-  - **Login** → **User registration**: Off, unless registration requires email verification.
-  - **User profile** → attribute `email` → **Permissions**: only admins can edit it, if your users
-    have access to the Keycloak account console. *To be checked in the validation run:* exact field
-    names in Keycloak 26.8.
+
+#### Lock down the email in the realm
+
+By default Keycloak 26.8 lets every user change their own email in the account console
+(**Personal info**) without confirming the new address. Change these settings in realm `example`:
+
+| Where in the admin console | Field | Value | Default |
+|---|---|---|---|
+| **Realm settings** → **User profile** → **Attributes** → `email` → **Permission** | **Who can edit?** | **Admin** only: untick **User** | Admin, User |
+| | **Who can view?** | Admin, User (leave) | Admin, User |
+| **Realm settings** → **Login** → **Email settings** | **Duplicate emails** | Off (leave) | Off |
+| | **Verify email** | **On** | Off |
+| **Realm settings** → **Login** → **Login screen customization** | **User registration** | Off (leave) | Off |
+| **Realm settings** → **Login** → **User info settings** | **Edit username** | Off (leave) | Off |
+| **Authentication** → **Required actions** | **Update Email**, column **Enabled** | Off (leave) | Off |
+
+Click **Save** after editing the `email` attribute.
+
+What each setting does:
+
+- **Who can edit?** decides whether users can change their email themselves. With only **Admin**,
+  the email is read-only in the account console and Keycloak refuses a change from the user. Admins
+  (users with the `manage-users` role) can still change it, so treat that role as able to log into
+  iTop as anyone.
+- **Verify email** is a second layer: a user whose email is not verified must confirm it by mail
+  before Keycloak lets them log in. This needs working mail settings on the realm's **Email** tab.
+  When you create a user whose address you know, set **Email verified** to On in the user form, or
+  the user gets a verification mail at the first login.
+- **Duplicate emails** Off makes sure no two Keycloak users share an email, so one email always
+  means one person.
+- **User registration** On would let anyone create an account and choose its email. Leave it off.
+- **Edit username** matters when **Email as username** is on: then the username follows the email.
+  The `email` permission above still applies.
+- **Update Email** is a required action that lets users change their email only after confirming
+  the new address by a link sent to it. It does nothing while **Who can edit?** excludes **User**.
+  Turn it on only if users should change their own email and you accept that whoever controls a
+  mailbox can then take over the iTop user with that login.
+- **Identity providers:** if your realm also lets users log in through other identity providers
+  (**Identity providers** in the menu), their email ends up in Keycloak. Keep **Trust Email** off
+  for providers whose emails you do not trust. With **Sync mode** `force`, that provider updates the
+  user's data, including the email, at every login. Whoever controls the email at that provider
+  then controls which iTop user they log in as.
+
+Check 3 of the [check list](#check-list) tests that a user cannot change their email.
 
 ## iTop: log in with Keycloak
 
@@ -336,6 +374,22 @@ To see what happens, set `'debug' => true` in the `Keycloak` provider entry and 
 `log/hybridauth.log`, and look for the channel `Hybridauth` in `log/error.log`. Remove `debug`
 afterwards: the logs then contain the provider configuration including the client secret, and user
 profiles.
+
+**The same user cannot change their email.** Open
+`https://sso.example.com/realms/example/account`, log in as that user, and go to **Personal info**.
+
+**Expected:** the **Email** field is read-only and there is no **Update email** link. Then, as a
+Keycloak admin, create a test user with **Email verified** Off and click **Sign in with Keycloak**
+on iTop as that user: Keycloak asks to verify the email before it sends you back to iTop. Delete the
+test user afterwards.
+
+**If not:**
+
+| Result | Fix |
+|---|---|
+| The user can edit **Email** and save it | **Who can edit?** of the `email` attribute still includes **User**. See [Lock down the email in the realm](#lock-down-the-email-in-the-realm). |
+| An **Update email** link is shown | Same cause: the **Update Email** required action is on and users may edit `email`. |
+| A user with an unverified email gets past the Keycloak login | **Verify email** is off on the realm's **Login** tab. |
 
 ### 4. The MCP OAuth flow goes through Keycloak to the consent page
 
