@@ -33,3 +33,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The server must decide the SDK's token resource check explicitly (ticket docker-build 14).
+filterwarnings = ["error:`AuthSettings.validate_token_resource` is not set:DeprecationWarning"]

@@ -141,7 +141,9 @@ class ITopTokenVerifier(TokenVerifier):
         if res.get("code") != 0:
             log.info("Token abgelehnt (%s): code=%s", _token_id(token), res.get("code"))
             return None
-        return AccessToken(token=token, client_id="itop-personal-token", scopes=["REST/JSON"], resource=MCP_RESOURCE_URL)
+        # resource bleibt leer: iTop sagt bei list_operations nicht, fuer welche Resource das Token
+        # ausgestellt wurde. Die Resource-Pruefung des SDK ist deshalb aus (siehe AuthSettings unten).
+        return AccessToken(token=token, client_id="itop-personal-token", scopes=["REST/JSON"])
 
 
 mcp = upstream.mcp
@@ -153,6 +155,11 @@ mcp.settings.auth = AuthSettings(
     issuer_url=ITOP_ISSUER,
     resource_server_url=MCP_RESOURCE_URL,
     required_scopes=["REST/JSON"],
+    # Explizit aus, damit ein SDK-Update (ab 3.0 Default True) nicht still aendert, wer reinkommt.
+    # Das Token wird vom ITopTokenVerifier direkt bei iTop geprueft. Ob altioo Tokens an die
+    # angefragte Resource (RFC 8707) bindet und wir das auslesen koennen, ist offen (Ticket
+    # docker-build 15); erst dann kann die Pruefung an.
+    validate_token_resource=False,
 )
 mcp._token_verifier = ITopTokenVerifier()
 
