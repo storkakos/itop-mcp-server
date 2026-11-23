@@ -132,9 +132,12 @@ terminates TLS on the public host name from `MCP_RESOURCE_URL` and forwards to t
 - forward both `/mcp` and `/.well-known/oauth-protected-resource/mcp` (MCP clients fetch the
   metadata there); forwarding the whole host is simplest
 - pass the public `Host` header through. The server only accepts its public host name (from
-  `MCP_RESOURCE_URL`) and loopback. A request with any other host gets `401` without a token and
-  `421 Misdirected Request` with a valid one. Likewise, an `Origin` header (sent by browser-based
-  clients) must be the origin of `MCP_RESOURCE_URL` or loopback, otherwise the request gets `403`.
+  `MCP_RESOURCE_URL`) and loopback. A request with any other host gets `421 Misdirected Request`.
+  Likewise, an `Origin` header (sent by browser-based clients) must be the origin of
+  `MCP_RESOURCE_URL` or loopback, otherwise the request gets `403 Forbidden`. This check comes
+  first, on every path including the `.well-known` metadata, and before the bearer token is looked
+  at: a refused request gets `421` or `403` with or without a token (never a `401` challenge), and
+  nothing is sent to iTop for it.
   Letter case does not matter, and the default port (`443` for `https`, `80` for `http`) may be
   present or left out, both in the `Host` header and in `MCP_RESOURCE_URL` (which must still match
   the `itop-mcp` resource in iTop character for character). A non-default port, as
@@ -315,7 +318,7 @@ checks and does **not** mean a successful start; look at the lines after it.
 tokens); `Token-Pruefung fehlgeschlagen … iTop nicht erreichbar` means the container cannot reach
 iTop (network, proxy, or certificate, see [Internal CA](#internal-ca)).
 
-**`421 Misdirected Request` through the reverse proxy** (once the client sends a valid token). The
+**`421 Misdirected Request` through the reverse proxy** (on every path, with or without a token). The
 proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. See [Reverse proxy](#reverse-proxy-tls).
 
 **The OAuth flow ends with "Unknown resource" in iTop.** `MCP_RESOURCE_URL` and the `itop-mcp`
