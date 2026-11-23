@@ -126,7 +126,8 @@ terminates TLS on the public host name from `MCP_RESOURCE_URL` and forwards to t
 - forward both `/mcp` and `/.well-known/oauth-protected-resource/mcp` (MCP clients fetch the
   metadata there); forwarding the whole host is simplest
 - pass the public `Host` header through. The server only accepts its public host name (from
-  `MCP_RESOURCE_URL`) and loopback; any other host gets `421 Misdirected Request`.
+  `MCP_RESOURCE_URL`) and loopback. A request with any other host gets `401` without a token and
+  `421 Misdirected Request` with a valid one.
 - pass the `Authorization` header through unchanged
 
 nginx:
@@ -286,8 +287,8 @@ checks and does **not** mean a successful start; look at the lines after it.
 tokens); `Token-Pruefung fehlgeschlagen … iTop nicht erreichbar` means the container cannot reach
 iTop (network, proxy, or certificate, see [Internal CA](#internal-ca)).
 
-**`421 Misdirected Request` through the reverse proxy.** The proxy does not pass the public `Host`
-header. See [Reverse proxy](#reverse-proxy-tls).
+**`421 Misdirected Request` through the reverse proxy** (once the client sends a valid token). The
+proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. See [Reverse proxy](#reverse-proxy-tls).
 
 **The OAuth flow ends with "Unknown resource" in iTop.** `MCP_RESOURCE_URL` and the `itop-mcp`
 resource in `config-itop.php` differ. See [Prerequisites on the iTop side](#prerequisites-on-the-itop-side).
