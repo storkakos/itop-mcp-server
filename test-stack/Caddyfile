@@ -1,0 +1,29 @@
+# TEST ONLY. TLS proxy for the example hostnames, with the test certificate from make-certs.sh.
+# Caddy passes the Host header and X-Forwarded-Proto/-For/-Host, as the manuals require.
+{
+	auto_https off
+}
+
+(tls_site) {
+	tls /certs/site.crt /certs/site.key
+}
+
+itop.example.com:443 {
+	import tls_site
+	reverse_proxy itop:80
+}
+
+sso.example.com:443 {
+	import tls_site
+	reverse_proxy keycloak:8080
+}
+
+chat.example.com:443 {
+	import tls_site
+	reverse_proxy librechat:3080
+}
+
+mcp.example.com:443 {
+	import tls_site
+	reverse_proxy mcp:8130
+}
