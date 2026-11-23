@@ -344,6 +344,9 @@ which starts the same flow:
 
 ## 9. Day-to-day operation
 
+**Your users.** Hand them the [user guide](user-guide.md): logging in, connecting once, asking good
+questions, disconnecting. Replace the example addresses in it with yours.
+
 **Who is connected.** In iTop, **Admin tools** → **OAuth connections** lists every active
 connection, with user, client, resource and end date. Users see their own under **My Account** →
 **Personal Tokens** → **Connected applications** and can end them there.

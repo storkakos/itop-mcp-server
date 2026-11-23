@@ -14,7 +14,8 @@ as LibreChat use it to let users read tickets and CIs from iTop through an AI as
 Based on [cdmx-in/itop-mcp](https://github.com/cdmx-in/itop-mcp) (MIT).
 
 New here? The [**quick start for administrators**](docs/quick-start.md) walks through the whole
-setup in order, with screenshots, and links to the detailed sections below.
+setup in order, with screenshots, and links to the detailed sections below. For the people who
+use the assistant, there is a [**user guide**](docs/user-guide.md).
 
 ## Contents
 
