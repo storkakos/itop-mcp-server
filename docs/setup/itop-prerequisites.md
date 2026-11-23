@@ -5,17 +5,19 @@
 access token that the MCP client sends to the MCP server. The MCP server only forwards that token to
 iTop's REST/JSON API. It stores no user secrets and issues no tokens.
 
-The manual uses only the altioo-oauth-server extension. Logging into iTop through an identity
-provider (Keycloak with combodo-hybridauth) is an optional addition, described in
-[the example setup](example-keycloak-librechat.md). Without it, users log in with iTop's own login
-form, and everything in this manual still works.
+The MCP server needs only the altioo-oauth-server extension. Logging into iTop through an
+**identity provider** (for example Keycloak) is optional: it needs the combodo-hybridauth extension
+and its two helper extensions, which this manual lists and installs alongside, marked *only with an
+identity provider*. How to connect hybridauth to Keycloak is described in
+[the example setup](example-keycloak-librechat.md). Without an identity provider, users log in with
+iTop's own login form, and everything in this manual still works.
 
 ## Contents
 
 1. [Example hostnames](#example-hostnames)
 2. [Requirements](#requirements)
 3. [Extensions](#extensions)
-4. [Install the extension](#install-the-extension)
+4. [Install the extensions](#install-the-extensions)
 5. [Configure iTop](#configure-itop)
 6. [Web server rewrites](#web-server-rewrites)
 7. [Licences](#licences)
@@ -50,8 +52,16 @@ manual and in the config snippets.
 |---|---|---|
 | iTop | 3.2.3 | pending |
 | altioo-oauth-server | 0.1.0 | pending |
+| combodo-hybridauth (only with an identity provider) | 2.1.1 | pending |
+| combodo-oauth2-client (only with an identity provider) | 1.0.9 | pending |
+| itop-attribute-encrypted-password (only with an identity provider) | 1.1.1 | pending |
 
 Newer versions should work but are untested.
+
+With an identity provider, use **iTop 3.2.3 or later**: Combodo's
+[hybridauth documentation](https://www.itophub.io/wiki/page?id=extensions:combodo-hybridauth) names
+iTop 3.2.3 as the minimum for the extension. *To be checked:* whether hybridauth 2.1.1 also runs on
+iTop 3.2.1 and 3.2.2; until then, treat 3.2.3 as the minimum for that path.
 
 ## Extensions
 
@@ -60,6 +70,22 @@ Download from the vendor and check the SHA256 before installing.
 | Extension | Version | Download | SHA256 | Licence |
 |---|---|---|---|---|
 | altioo-oauth-server | `v0.1.0` | [altioo-oauth-server-0.1.0.zip](https://github.com/AltiooBV/altioo-oauth-server/releases/download/v0.1.0/altioo-oauth-server-0.1.0.zip) | `d8933b65e2250d029238923efc0a4acff4b80a099b815a43dad97a0d30b6e320` | [AGPL-3.0-or-later](https://github.com/AltiooBV/altioo-oauth-server/blob/v0.1.0/LICENSE) |
+
+**Only with an identity provider** (login to iTop through Keycloak or another OpenID Connect
+provider). combodo-hybridauth depends on combodo-oauth2-client (which ships the HybridAuth library,
+including its Keycloak adapter), and that depends on itop-attribute-encrypted-password. Install all
+three; the versions below were released together with hybridauth 2.1.1.
+
+| Extension | Version | Download | SHA256 | Licence |
+|---|---|---|---|---|
+| combodo-hybridauth | `2.1.1` | [2.1.1.zip](https://github.com/Combodo/combodo-hybridauth/archive/refs/tags/2.1.1.zip) | `5ddb33cc94669d65e540d51a484a56fc7b5a38bfe8f73f8709d217653d6ab3e6` | [Combodo Software License](https://www.combodo.com/documentation/combodo-software-license.html) |
+| combodo-oauth2-client | `1.0.9` | [1.0.9.zip](https://github.com/Combodo/combodo-oauth2-client/archive/refs/tags/1.0.9.zip) | `3ee6fff206696b6f930cf977a6ec8707033f00fb4b9ff9c4bf818e5b8e0e0f4b` | [AGPL-3.0](https://github.com/Combodo/combodo-oauth2-client/blob/1.0.9/module.combodo-oauth2-client.php) (stated in the module file) |
+| itop-attribute-encrypted-password | `1.1.1` | [1.1.1.zip](https://github.com/Combodo/itop-attribute-encrypted-password/archive/refs/tags/1.1.1.zip) | `4f0e5f2efb996ef65cfd5726ed48dbb658bd8bfc0d23e548cd856ea02bfb5027` | [AGPL-3.0](https://github.com/Combodo/itop-attribute-encrypted-password/blob/1.1.1/module.itop-attribute-encrypted-password.php) (stated in the module file) |
+
+These three are GitHub tag archives. GitHub generates them on download; their hash has been stable
+in practice, but GitHub does not guarantee it. If a hash does not match, compare the contents with
+the tag on GitHub before you install. The same extensions are also available from Combodo's
+[iTop Hub](https://store.itophub.io/), which may ship a different packaging.
 
 Check the download:
 
@@ -72,11 +98,13 @@ Get-FileHash altioo-oauth-server-0.1.0.zip -Algorithm SHA256
 ```
 
 The vendor's README in the ZIP (`README.md`) describes every setting in detail. This manual covers
-only what the MCP server needs.
+only what the MCP server needs. For hybridauth, Combodo's
+[extension documentation](https://www.itophub.io/wiki/page?id=extensions:combodo-hybridauth) lists
+all settings.
 
-## Install the extension
+## Install the extensions
 
-These steps upgrade an existing iTop. Plan a short maintenance window: the setup wizard recompiles
+These steps upgrade an existing iTop. Install all extensions you need in one run of the wizard. Plan a short maintenance window: the setup wizard recompiles
 iTop.
 
 ### 1. Back up
@@ -86,10 +114,24 @@ configuration values and only fills in missing keys, but if it cannot parse the 
 it starts with a blank one. A backup of the whole iTop directory is safest, because setup rewrites
 `env-production/`.
 
-### 2. Copy the extension
+### 2. Copy the extensions
 
 Unpack the ZIP into iTop's `extensions/` folder so that `extensions/altioo-oauth-server/README.md`
 exists. Make sure the web server user can read the files.
+
+**Only with an identity provider:** GitHub tag archives unpack into a folder with the version in its
+name (`combodo-hybridauth-2.1.1/`). Rename each folder to the extension's name, so that these files
+exist:
+
+```
+extensions/combodo-hybridauth/module.combodo-hybridauth.php
+extensions/combodo-oauth2-client/module.combodo-oauth2-client.php
+extensions/itop-attribute-encrypted-password/module.itop-attribute-encrypted-password.php
+```
+
+The folder name matters: hybridauth's callback URL, which you register in the identity provider,
+is built from it (`https://itop.example.com/env-production/combodo-hybridauth/landing.php`). The
+archives already contain their `vendor/` libraries; no Composer run is needed.
 
 Copying alone changes nothing: iTop runs the compiled copy in `env-production/`, which the setup
 wizard creates in the next step.
@@ -99,6 +141,12 @@ wizard creates in the next step.
 1. Open `https://itop.example.com/setup/` and choose **Upgrade an existing iTop instance**.
 2. In the extensions step, **tick altioo-oauth-server**. On an upgrade, new extensions are **not**
    ticked by default. If you skip this, the extension is not installed and nothing below works.
+   **Only with an identity provider:** also tick **oAuth/OpenID authentication**. That is
+   combodo-hybridauth: it has no `extension.xml`, so the wizard shows it as its own checkbox under
+   its module label, and it is not ticked either. combodo-oauth2-client and
+   itop-attribute-encrypted-password are hidden modules and get no checkbox. *To be checked in the
+   validation run:* that the wizard installs them along with hybridauth; if it reports a missing
+   dependency instead, check the folder names from step 2.
 3. Finish the wizard. It adds three tables (`priv_altioo_oauth_client`, `priv_altioo_oauth_grant`,
    `priv_altioo_oauth_code`).
 
@@ -128,7 +176,7 @@ error takes iTop down.
 ### Fresh installation
 
 For a new iTop, follow the [iTop installation guide](https://www.itophub.io/wiki/page?id=latest:install:start)
-with the extension already in `extensions/`, tick it in the extension step, then continue with
+with the extensions already in `extensions/`, tick them in the extension step, then continue with
 [Configure iTop](#configure-itop).
 
 ## Configure iTop
@@ -166,6 +214,9 @@ $MySettings = array(
 	// Keep the login types you already use and add "token".
 	// The first entry is the default login page; "form" first keeps iTop's own login form.
 	'allowed_login_types' => 'form|token',
+	// With an identity provider, also add "hybridauth-<provider>", where <provider> is the key
+	// under combodo-hybridauth → providers (case-sensitive). For the Keycloak example setup:
+	// 'allowed_login_types' => 'form|token|hybridauth-Keycloak',
 
 	// Lets a personal token call REST/JSON without the "REST Services User" profile.
 	'allow_rest_services_via_tokens' => true,
@@ -311,6 +362,9 @@ terms.
 | Extension | Vendor | Licence |
 |---|---|---|
 | altioo-oauth-server | [Altioo BV](https://github.com/AltiooBV/altioo-oauth-server) | [GNU AGPL-3.0-or-later](https://github.com/AltiooBV/altioo-oauth-server/blob/v0.1.0/LICENSE) |
+| combodo-hybridauth (only with an identity provider) | [Combodo](https://github.com/Combodo/combodo-hybridauth) | [Combodo Software License](https://www.combodo.com/documentation/combodo-software-license.html), as stated in the extension's source files; the repository has no licence file |
+| combodo-oauth2-client (only with an identity provider) | [Combodo](https://github.com/Combodo/combodo-oauth2-client) | AGPL-3.0, as stated in the module file; it bundles the [HybridAuth](https://hybridauth.github.io/license.html) library under its own permissive licence (`vendor/hybridauth/hybridauth/COPYING.md`) |
+| itop-attribute-encrypted-password (only with an identity provider) | [Combodo](https://github.com/Combodo/itop-attribute-encrypted-password) | AGPL-3.0, as stated in the module file |
 
 iTop itself is licensed by Combodo under the AGPL-3.0 (community edition) or a commercial licence.
 
