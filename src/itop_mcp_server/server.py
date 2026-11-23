@@ -35,7 +35,7 @@ from starlette.responses import PlainTextResponse
 from . import __version__
 from . import upstream_main as upstream
 
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, normalise_host
 
 # Konfiguration beim Import lesen: fehlt ein Pflichtwert, bricht der Start hier ab
 # (Meldung nennt die Variable, kein Traceback, kein Rueckfall auf localhost).
@@ -202,22 +202,47 @@ def _allowed(value: str, patterns: list[str]) -> bool:
     return any(value == p or (p.endswith(":*") and value.startswith(p[:-1])) for p in patterns)
 
 
+def _normal_host_header(value: str) -> str:
+    """A Host header value ("host", "host:port", "[ipv6]", "[ipv6]:port") with its host in normal form
+    (normalise_host: lower case, no trailing dot, IPv6 compressed). A value it cannot split is only
+    lower-cased; it then matches no allowed host and is refused."""
+    value = value.lower()
+    if value.startswith("["):
+        end = value.find("]")
+        rest = value[end + 1:]
+        if end == -1 or (rest and not rest.startswith(":")):
+            return value
+        return f"[{normalise_host(value[1:end])}]{rest}"
+    if value.count(":") > 1:  # an IPv6 literal must be in brackets
+        return value
+    host, sep, port = value.partition(":")
+    return normalise_host(host) + sep + port
+
+
+def _normal_origin(value: str) -> str:
+    """An Origin header value (scheme://host[:port], no path) with its host in normal form."""
+    scheme, sep, host = value.lower().partition("://")
+    return scheme + sep + _normal_host_header(host) if sep else value.lower()
+
+
 class _HostOriginCheck:
     """Refuses a foreign Host (421) or Origin (403) before anything else runs.
 
-    Host names and schemes are case-insensitive, so both headers are lower-cased first (and passed on
-    lower-cased, so the SDK's case-sensitive check agrees). CONFIG.public_hosts/public_origin are
-    already lower case, and an origin has no path, so lower-casing does not change its meaning.
+    Equivalent spellings of a host are one host: names and schemes are case-insensitive, a fully
+    qualified name may end in a dot, and an IPv6 literal can be written in several ways. Both headers
+    are therefore brought into normal form first, the form CONFIG.public_hosts/public_origin are in
+    (config.normalise_host), and passed on in that form, so the SDK's exact-match check agrees.
     """
 
-    _HEADERS = (b"host", b"origin")
+    _NORMALISE = {b"host": _normal_host_header, b"origin": _normal_origin}
 
     def __init__(self, app: Any) -> None:
         self.app = app
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] in ("http", "websocket"):
-            headers = [(k, v.lower() if k in self._HEADERS else v) for k, v in scope["headers"]]
+            headers = [(k, self._NORMALISE[k](v.decode("latin-1")).encode("latin-1") if k in self._NORMALISE else v)
+                       for k, v in scope["headers"]]
             scope = {**scope, "headers": headers}
             found = dict(headers)
             host = found.get(b"host", b"").decode("latin-1")

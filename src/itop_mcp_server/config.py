@@ -12,11 +12,15 @@ Fehlt ein Pflichtwert, gibt es keinen Rueckfall auf localhost: der Start bricht 
 Meldung ab, die die Variable nennt.
 
 MCP_RESOURCE_URL muss eine http(s)-URL mit Host sein. Host (und Port) daraus sind die
-oeffentlichen Host-Header-Werte, die der Reverse Proxy durchreicht (public_hosts), immer in
-Kleinbuchstaben; der Server vergleicht eingehende Host-/Origin-Header ebenfalls klein.
+oeffentlichen Host-Header-Werte, die der Reverse Proxy durchreicht (public_hosts).
+
+The public hosts are in normal form (normalise_host): lower case, without a trailing dot, IPv6
+literals compressed. The server brings incoming Host and Origin headers into the same form before
+comparing them, so equivalent spellings of the public host are accepted.
 """
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -75,13 +79,26 @@ def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
     return number
 
 
+def normalise_host(hostname: str) -> str:
+    """One spelling per host name: lower case, without the trailing dot of a fully qualified name, an
+    IPv6 literal (without brackets) in compressed form. Anything that is not a valid IPv6 literal is
+    only lower-cased and stripped of one trailing dot, so it can never turn into an allowed host."""
+    hostname = hostname.lower()
+    if ":" in hostname:
+        try:
+            return ipaddress.IPv6Address(hostname).compressed
+        except ValueError:
+            return hostname
+    return hostname[:-1] if hostname.endswith(".") else hostname
+
+
 def _public_host(resource_url: str) -> tuple[tuple[str, ...], str]:
     """Host-Header-Werte und Origin aus MCP_RESOURCE_URL.
 
     Ohne Port oder mit dem Standardport des Schemas (443/80) in der URL: "host" und
     "host:<Standardport>" (Proxys senden beides), Origin ohne Port (so senden ihn Browser).
     Mit anderem Port: nur "host:port".
-    urlsplit liefert Schema und Hostname bereits in Kleinbuchstaben.
+    The host is in normal form (normalise_host); urlsplit already returns the scheme in lower case.
     """
     parts = urlsplit(resource_url)
     try:
@@ -90,6 +107,7 @@ def _public_host(resource_url: str) -> tuple[tuple[str, ...], str]:
         hostname, port = None, None
     if parts.scheme not in DEFAULT_PORTS or not hostname:
         raise ConfigError(f"MCP_RESOURCE_URL muss eine http(s)-URL mit Host sein, ist aber {resource_url!r}")
+    hostname = normalise_host(hostname)
     host = f"[{hostname}]" if ":" in hostname else hostname
     if port is None or port == DEFAULT_PORTS[parts.scheme]:
         return (host, f"{host}:{DEFAULT_PORTS[parts.scheme]}"), f"{parts.scheme}://{host}"
