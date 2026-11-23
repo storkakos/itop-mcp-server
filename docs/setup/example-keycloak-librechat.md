@@ -481,6 +481,26 @@ Users who pick **iTop assistant** in the model menu have the `itop` server switc
 Users of other models can switch it on themselves under **MCP Servers** in the chat input. Use a
 model that supports tool calls. If `modelSpecs` already exists, add the entry to its `list`.
 
+**Option: iTop assistant preselected.** To start every new chat with the iTop assistant and the
+`itop` server switched on, without a click, add three keys (LibreChat
+[`modelSpecs`](https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/model_specs)):
+
+```yaml
+modelSpecs:
+  # Model specs come before the model a user chose last.
+  prioritize: true
+  # false: users may still pick other models and endpoints.
+  enforce: false
+  list:
+    - name: itop-assistant
+      # This spec is the default for new chats.
+      default: true
+      # ... label, description, preset and mcpServers as above ...
+```
+
+Users can still pick another model, switch the `itop` server off for a chat under **MCP Servers**,
+and switch it on again. With `enforce: true` they could use only the listed model specs.
+
 ### iTop: allow LibreChat's callback
 
 LibreChat registers itself with iTop with the callback
