@@ -13,8 +13,18 @@ Before you start:
 - Keycloak is installed and reachable over HTTPS, with a realm for your users. Installing Keycloak
   is not covered; see the [Keycloak documentation](https://www.keycloak.org/documentation).
 
-<!-- Ticket 03 (LibreChat) adds the LibreChat prerequisites here (installed LibreChat, links to
-     the LibreChat docs for installation, MongoDB and LLM setup). -->
+- LibreChat is installed, reachable over HTTPS behind your reverse proxy, and works with at least
+  one AI model. This manual covers only the LibreChat settings for Keycloak and the MCP server.
+  Not covered, see the LibreChat documentation:
+  - installing LibreChat: [Docker setup](https://www.librechat.ai/docs/local/docker)
+  - MongoDB: [MongoDB Community Server](https://www.librechat.ai/docs/configuration/mongodb/mongodb_community)
+    or [MongoDB Atlas](https://www.librechat.ai/docs/configuration/mongodb/mongodb_atlas)
+  - setting up AI models (LLM endpoints):
+    [AI endpoints](https://www.librechat.ai/docs/configuration/librechat_yaml/ai_endpoints)
+  - all `librechat.yaml` options:
+    [librechat.yaml](https://www.librechat.ai/docs/configuration/librechat_yaml), and LibreChat's own
+    pages on [MCP](https://www.librechat.ai/docs/features/mcp) and
+    [Keycloak](https://www.librechat.ai/docs/configuration/authentication/OAuth2-OIDC/keycloak)
 
 ## Contents
 
@@ -24,10 +34,9 @@ Before you start:
 4. [Keycloak: client for iTop](#keycloak-client-for-itop)
 5. [iTop: log in with Keycloak](#itop-log-in-with-keycloak)
 6. [iTop user accounts](#itop-user-accounts)
-7. [Check list](#check-list)
-
-<!-- Ticket 03 adds its sections (Keycloak client for LibreChat, LibreChat configuration) between
-     "iTop user accounts" and "Check list", and adds them to this list. -->
+7. [Keycloak: client for LibreChat](#keycloak-client-for-librechat)
+8. [LibreChat](#librechat)
+9. [Check list](#check-list)
 
 ## Example hostnames
 
@@ -41,7 +50,9 @@ manual and in the config snippets.
 | `example` | Keycloak realm of your users | |
 | `https://sso.example.com/realms/example` | Issuer of the realm (derived from the two lines above) | |
 | `https://itop.example.com/env-production/combodo-hybridauth/landing.php` | hybridauth's callback in iTop (derived from the iTop URL) | |
-| `https://chat.example.com` | LibreChat | |
+| `https://chat.example.com` | LibreChat (`DOMAIN_CLIENT` and `DOMAIN_SERVER`) | |
+| `https://chat.example.com/oauth/openid/callback` | LibreChat's callback for the Keycloak login (derived from the LibreChat URL) | |
+| `https://chat.example.com/api/mcp/itop/oauth/callback` | LibreChat's callback for the iTop OAuth flow (derived from the LibreChat URL and the server name `itop`) | |
 | `https://mcp.example.com/mcp` | Public URL of the MCP server (`MCP_RESOURCE_URL`) | |
 
 ## Who does what
@@ -79,8 +90,7 @@ What a user experiences the first time they connect the assistant:
 | iTop | 3.2.3 | pending |
 | combodo-hybridauth | 2.1.1 | pending |
 | Keycloak | 26.8.2 | pending |
-
-<!-- Ticket 03 adds the LibreChat row (v0.8.9). -->
+| LibreChat | v0.8.9 | pending |
 
 Newer versions should work but are untested.
 
@@ -273,12 +283,175 @@ Mapping Keycloak groups to iTop profiles (`groups_to_profiles`) is possible but 
 example; see Combodo's
 [hybridauth documentation](https://www.itophub.io/wiki/page?id=extensions:combodo-hybridauth).
 
-<!-- Ticket 03 inserts here:
-     ## Keycloak: client for LibreChat   (field-value table for the confidential client "librechat",
-        redirect https://chat.example.com/oauth/openid/callback, same flow settings as "itop")
-     ## LibreChat                         (.env OpenID keys, librechat.yaml mcpServers.itop,
-        mcpSettings.allowedDomains, modelSpecs, altioo redirect_uris entry for
-        https://chat.example.com/api/mcp/itop/oauth/callback) -->
+## Keycloak: client for LibreChat
+
+LibreChat logs users in through a second **confidential** OpenID Connect client named `librechat`
+in the same realm `example`. Create it like the `itop` client: **Clients** → **Create client**, fill
+in the values below, **Save**, then copy the **Client Secret** from the **Credentials** tab. You need
+it in [LibreChat](#librechat).
+
+| Page | Field | Value |
+|---|---|---|
+| General settings | Client type | `OpenID Connect` |
+| | Client ID | `librechat` |
+| | Name | `LibreChat` |
+| Capability config | Client authentication | **On** (confidential client) |
+| | Authorization | Off |
+| | Standard flow | **On** |
+| | Direct access grants | **Off** (on by default when the client is created; untick it) |
+| | Implicit flow | Off |
+| | Service accounts roles | Off |
+| | Standard Token Exchange | Off |
+| | OAuth 2.0 Device Authorization Grant | Off |
+| | OIDC CIBA Grant | Off |
+| | PKCE method | empty (see below) |
+| Login settings | Root URL | `https://chat.example.com` |
+| | Home URL | `https://chat.example.com/` |
+| | Valid redirect URIs | `https://chat.example.com/oauth/openid/callback` (exactly this, no wildcard) |
+| | Valid post logout redirect URIs | empty |
+| | Web origins | empty (LibreChat calls Keycloak from the server, not from the browser) |
+
+The reasons are the same as for the [`itop` client](#keycloak-client-for-itop): authorization code
+flow only, exact redirect URI. **PKCE method empty** means Keycloak accepts a login with or without
+PKCE. LibreChat sends PKCE (`S256`) when `OPENID_USE_PKCE=true`, and the client secret protects the
+code exchange either way.
+
+LibreChat users are the same realm users as iTop users, so the rules in
+[Users in Keycloak](#users-in-keycloak) apply to them too. LibreChat also needs the `email` client
+scope, which new clients get by default.
+
+**This client is for logging into LibreChat only.** Do not use it, or any other Keycloak client, for
+the MCP server. LibreChat gets the token for the MCP server from iTop (see
+[Who does what](#who-does-what)).
+
+## LibreChat
+
+Two files change: `.env` (the Keycloak login) and `librechat.yaml` (the MCP server). Restart
+LibreChat after changing either of them.
+
+### `.env`: log in with Keycloak
+
+Set or add these keys:
+
+```sh
+# Public URL of LibreChat. Both callbacks are built from DOMAIN_SERVER.
+DOMAIN_CLIENT=https://chat.example.com
+DOMAIN_SERVER=https://chat.example.com
+
+# Keycloak login. Social login must be on for OpenID to be offered.
+ALLOW_SOCIAL_LOGIN=true
+# Creates the LibreChat account on a user's first Keycloak login.
+ALLOW_SOCIAL_REGISTRATION=true
+
+OPENID_ISSUER=https://sso.example.com/realms/example
+OPENID_CLIENT_ID=librechat
+OPENID_CLIENT_SECRET=<client secret from the Credentials tab of the librechat client>
+OPENID_SCOPE="openid profile email"
+OPENID_CALLBACK_URL=/oauth/openid/callback
+# A long random value, for example from: openssl rand -hex 32
+OPENID_SESSION_SECRET=<random value>
+OPENID_BUTTON_LABEL=Sign in with Keycloak
+# Untested; set to false if login fails.
+OPENID_USE_PKCE=true
+```
+
+- `OPENID_ISSUER` is the realm's issuer, without `/.well-known/...`.
+- `OPENID_CALLBACK_URL` is a path. LibreChat puts `DOMAIN_SERVER` in front of it, which must give
+  exactly the **Valid redirect URI** of the `librechat` client.
+- `OPENID_USE_PKCE=true` adds PKCE on top of the client secret. *Untested; set to false if login
+  fails.* The validation run decides whether it stays.
+- If only Keycloak users should use LibreChat, also set `ALLOW_REGISTRATION=false`. Keep
+  `ALLOW_EMAIL_LOGIN` as it is if you need a local LibreChat admin account.
+
+LibreChat sits behind your reverse proxy. The proxy must pass `X-Forwarded-Proto: https` to
+LibreChat. Otherwise LibreChat does not set its session cookie during the Keycloak login, and the
+login fails with "Unable to verify authorization request state" in LibreChat's log.
+
+### `librechat.yaml`: the iTop MCP server
+
+Add three parts to `librechat.yaml`. Keep the `version` line and everything else in the file.
+
+**`mcpServers`:** the MCP server, under the name `itop`:
+
+```yaml
+mcpServers:
+  itop:
+    type: streamable-http
+    # Exactly the MCP server's MCP_RESOURCE_URL.
+    url: https://mcp.example.com/mcp
+    title: iTop
+    description: Tickets, CIs and contacts from iTop, with your own iTop rights
+    # Every user connects with their own iTop account.
+    requiresOAuth: true
+    # No "oauth:" block: LibreChat finds iTop through the MCP server's metadata
+    # and registers itself with iTop dynamically.
+```
+
+- The name `itop` is part of LibreChat's callback URL
+  (`https://chat.example.com/api/mcp/itop/oauth/callback`). If you choose another name, the
+  callback in iTop changes with it.
+- **No `oauth:` block.** LibreChat reads the MCP server's metadata, finds iTop as the
+  authorization server and registers itself there (dynamic client registration). An `oauth:` block
+  is for clients registered by hand, with fixed endpoints and client ID, which this setup does not
+  use.
+
+**`mcpSettings`:** the hosts LibreChat may contact for MCP:
+
+```yaml
+mcpSettings:
+  allowedDomains:
+    - "https://mcp.example.com"
+    - "https://itop.example.com"
+```
+
+- List **both** hosts. LibreChat checks the MCP server's URL against this list, and also iTop's
+  OAuth endpoints (metadata, registration, token). A host that is not listed is only allowed if it
+  resolves to a public IP address. In most companies iTop resolves to a private address, and the
+  connection then fails with "OAuth ... resolves to a private IP address" in LibreChat's log.
+- Once `allowedDomains` is set, LibreChat contacts **only** the listed hosts for MCP. If you already
+  have other MCP servers, add their hosts too.
+
+**`modelSpecs`:** a model entry with the iTop server switched on:
+
+```yaml
+modelSpecs:
+  list:
+    - name: itop-assistant
+      label: iTop assistant
+      description: Answers questions about iTop with your own iTop rights
+      preset:
+        # An endpoint and model you have already set up in LibreChat.
+        endpoint: <your endpoint>
+        model: <your model>
+      mcpServers:
+        - itop
+```
+
+Users who pick **iTop assistant** in the model menu have the `itop` server switched on in the chat.
+Users of other models can switch it on themselves under **MCP Servers** in the chat input. Use a
+model that supports tool calls. If `modelSpecs` already exists, add the entry to its `list`.
+
+### iTop: allow LibreChat's callback
+
+LibreChat registers itself with iTop with the callback
+`https://chat.example.com/api/mcp/itop/oauth/callback`. iTop accepts the registration only if this
+callback is in `redirect_uris` of altioo-oauth-server. In `config-itop.php`
+(see [the prerequisites](itop-prerequisites.md#settings-in-mymodulesettings)):
+
+```php
+	'altioo-oauth-server' => array(
+		// LibreChat's MCP callback, exactly: DOMAIN_SERVER + /api/mcp/<server name>/oauth/callback
+		'redirect_uris' => array(
+			'https://chat.example.com/api/mcp/itop/oauth/callback',
+		),
+		// Callbacks on localhost/127.0.0.1 are for local tests only. Keep false in production.
+		'allow_loopback' => false,
+		// ... the other settings from the prerequisites ...
+	),
+```
+
+`allow_loopback => true` would let any client with a `localhost` callback register, including one a
+user runs on their own computer. Use it only for local tests, never on a production iTop.
 
 ## Check list
 
@@ -355,5 +528,61 @@ at Keycloak, and land on the altioo-oauth-server **consent page** naming the cli
 | After the Keycloak login you land on iTop's home page instead of the consent page | hybridauth returns to the page you came from only if its URL, as PHP sees it (`REQUEST_SCHEME`, `HTTP_HOST`, `REQUEST_URI`), starts with iTop's `app_root_url`. Otherwise it falls back to the home page. Behind a reverse proxy that terminates TLS, PHP often sees `http` or an internal host. Make PHP see the public scheme and host, for example nginx `fastcgi_param REQUEST_SCHEME https;` with the public `Host` header passed through, or Apache `ServerName https://itop.example.com`. *To be checked in the validation run:* these snippets against the reverse proxy used there. Then start the connection in the client again. |
 | "Personal tokens not allowed", refusal before the consent page, "Unknown resource" | Not related to Keycloak: see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). The External user needs the same profiles as a local user would. |
 
-<!-- Ticket 03 adds its checks after this one: LibreChat login via Keycloak; connecting the "itop"
-     server opens the iTop consent page; "whoami" in the chat returns the logged-in iTop user. -->
+### 5. A Keycloak user logs into LibreChat
+
+Open `https://chat.example.com/` in a new private window and click **Sign in with Keycloak**.
+
+**Expected:** Keycloak's login page for realm `example`, then LibreChat, logged in with the user's
+name. On the first login, LibreChat creates the account.
+
+**If not:**
+
+| Result | Fix |
+|---|---|
+| No **Sign in with Keycloak** button | `ALLOW_SOCIAL_LOGIN` is not `true`, or `OPENID_CLIENT_ID`/`OPENID_ISSUER` is missing. LibreChat's log says "Configuring OpenID Connect..." when it picks the settings up. Restart LibreChat after changing `.env`. |
+| Keycloak: "Invalid parameter: redirect_uri" | `DOMAIN_SERVER` + `OPENID_CALLBACK_URL` is not exactly the **Valid redirect URI** of the `librechat` client. |
+| Back in LibreChat with an error, and LibreChat's log says "Unable to verify authorization request state" | The reverse proxy does not pass `X-Forwarded-Proto: https`, so LibreChat did not set its session cookie. See [`.env`](#env-log-in-with-keycloak). |
+| Back in LibreChat with an error, and LibreChat's log says "social registration is disabled" | `ALLOW_SOCIAL_REGISTRATION` is not `true`, so LibreChat does not create accounts for new Keycloak users. |
+| Back in LibreChat with an error, other message in LibreChat's log | With a PKCE error, set `OPENID_USE_PKCE=false` and restart. A token error usually means a wrong `OPENID_CLIENT_SECRET`. |
+| LibreChat's log says it cannot reach the issuer | LibreChat cannot reach `https://sso.example.com` from its server, or does not trust its certificate. For an internal CA, set `NODE_EXTRA_CA_CERTS` to the CA file for LibreChat. |
+
+### 6. Connecting the `itop` server opens the iTop consent page
+
+In LibreChat, open **MCP Servers** in the chat input (or pick the **iTop assistant** model) and
+click **Connect** next to **iTop**.
+
+**Expected:** a new browser tab with iTop's login page. Click **Sign in with Keycloak**. With the
+Keycloak session from check 5 you go straight to the altioo-oauth-server **consent page**, naming
+**LibreChat MCP Client** and "iTop assistant". After consent, LibreChat shows
+**Authentication Successful**, and **iTop** shows **Connected** under **MCP Servers**.
+
+**If not:**
+
+| Result | Fix |
+|---|---|
+| LibreChat shows an error before any iTop page, and its log names a blocked address, a private IP address or a domain that is not allowed | `mcpSettings.allowedDomains` does not list both `https://mcp.example.com` and `https://itop.example.com`. |
+| LibreChat shows an error before any iTop page, and its log says the client registration failed | LibreChat's callback is not in `redirect_uris`: see [iTop: allow LibreChat's callback](#itop-allow-librechats-callback). iTop's error log (channel `altioo-oauth-server`) names the callback LibreChat sent; it must be exactly `https://chat.example.com/api/mcp/itop/oauth/callback`. If it starts with `http://localhost:3080`, `DOMAIN_SERVER` is not set. |
+| iTop says "Unknown resource" | `url` under `mcpServers` → `itop`, `MCP_RESOURCE_URL` and the `itop-mcp` resource in iTop differ. See check 4 of [the prerequisites](itop-prerequisites.md#4-the-resource-url-matches-in-all-three-places). |
+| After the Keycloak login you land on iTop's home page instead of the consent page | See check 4 above. |
+| Refusal before the consent page | The iTop user lacks the profiles; see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
+| The tab ends on a LibreChat error page after consent | Check LibreChat's log for the token exchange with iTop, and iTop's error log (channel `altioo-oauth-server`). |
+
+### 7. `whoami` names the logged-in iTop user
+
+Start a new chat with the **iTop assistant** model (or with the `itop` server switched on) and ask:
+
+> Use the whoami tool: who am I in iTop?
+
+**Expected:** the assistant calls the `whoami` tool, and the answer contains
+`Angemeldet in iTop als: <name>`, where `<name>` is the Person linked to the iTop user who gave
+consent in check 6, the user matching the Keycloak email. Log in as a second user and repeat: the
+answer must name the second user. The assistant then sees what that iTop user may see, and nothing
+more.
+
+**If not:**
+
+| Result | Fix |
+|---|---|
+| The model answers without calling a tool | The model does not support tool calls, or the `itop` server is not switched on in this chat. |
+| `Angemeldet in iTop als: ?` | The token works, but the iTop user has no linked Person (**Contact** of the External user), or every tool call fails: see "Connected, but every tool call fails" in check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
+| Another person's name | The browser was still logged into iTop as someone else when consent was given in check 6, and iTop issued the token for that user. Disconnect **iTop** in LibreChat, log out of iTop, and connect again. Each user should give consent in their own browser session. |
