@@ -29,6 +29,12 @@ git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - \
 $SSH 'cd /root/itop-mcp-server && bash scripts/smoke-test.sh'
 ```
 
+`.gitattributes` gives every text file LF line endings, also on Windows with `core.autocrlf=true`, so the copy runs on Linux as-is. A checkout made before that rule existed keeps its CRLF files until they are written again; `git ls-files --eol | grep -v w/lf` lists them. To rewrite them, commit or stash your changes first, then run this in the checkout:
+
+```sh
+git ls-files -z | xargs -0 rm -f -- && git checkout -- .
+```
+
 ## Notes
 
 - The VM exists only for testing and may be wiped or recreated at any time. If the host key changed, ask the maintainer before you trust the new one.
