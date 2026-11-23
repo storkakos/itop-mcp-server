@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=69"]
+# Pinned exactly, like the runtime dependencies. Keep equal to requirements-build.lock, which the
+# Docker image installs and builds with (no build isolation).
+requires = ["setuptools==84.2.1", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
