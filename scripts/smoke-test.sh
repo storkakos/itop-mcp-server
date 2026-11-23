@@ -45,7 +45,9 @@ compose() {
 }
 
 # helpers usable with check (bash runs functions through "$@")
-startup_logged() { compose logs --no-color "$SERVICE" | grep -q 'iTop MCP-Server auf'; }
+# Read the logs first: piped straight into grep -q, docker compose logs can die of SIGPIPE after the
+# match, and pipefail then fails the check although the line is there.
+startup_logged() { local logs; logs="$(compose logs --no-color "$SERVICE")" && grep -q 'iTop MCP-Server auf' <<<"$logs"; }
 audit_has_whoami() { grep -q '"tool": "whoami"' "$AUDIT"; }
 token_not_in_audit() { ! grep -Fq "$TOKEN" "$AUDIT"; }
 root_fs_not_writable() { compose exec -T "$SERVICE" sh -c '! touch /app/probe 2>/dev/null'; }
