@@ -15,3 +15,5 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 ### Test VM
 
 For anything that needs Docker (this machine has none), there is a test VM reachable over SSH. See `docs/agents/test-vm.md`.
+
+Tests never run locally on this machine: not pytest, not the smoke test. Run pytest with `bash scripts/test-on-vm.sh` (arguments go to pytest); it runs the suite on the test VM and cleans up after itself.
