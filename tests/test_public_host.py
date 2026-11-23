@@ -3,6 +3,8 @@
 The host (and port) of MCP_RESOURCE_URL must be accepted; the DNS-rebinding protection stays on
 for every other host. Loopback keeps working for the container healthcheck. The host and origin
 check runs before the token check, on every route, so a refused request never reaches iTop.
+Equivalent spellings of a host (letter case, trailing dot, IPv6 literal written differently) are the
+same host, on the configured and on the incoming side.
 """
 from __future__ import annotations
 
@@ -28,6 +30,12 @@ def _call_whoami(base_url: str, host: str, origin: str | None = None) -> httpx.R
     return httpx.post(f"{base_url}/mcp", json=body, headers=headers, timeout=30)
 
 
+def _challenge(base_url: str, host: str) -> httpx.Response:
+    body = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+    headers = {"Accept": "application/json, text/event-stream", "Host": host}
+    return httpx.post(f"{base_url}/mcp", json=body, headers=headers, timeout=30)
+
+
 def _resource_metadata_url(response: httpx.Response) -> str:
     m = re.search(r'resource_metadata="([^"]+)"', response.headers["www-authenticate"])
     assert m, response.headers["www-authenticate"]
@@ -50,6 +58,32 @@ def _post_mcp(base_url: str, host: str, token: str | None, origin: str | None = 
     if origin is not None:
         headers["Origin"] = origin
     return httpx.post(f"{base_url}/mcp", json=body, headers=headers, timeout=30)
+
+
+# --- the advertised URL never names the bind address -----------------------------------------
+
+# The server configured exactly as in the container (MCP_HOST=0.0.0.0), but its app served on loopback
+# only, so the test never opens a port on all interfaces of the machine it runs on.
+_SERVE_WILDCARD_CONFIG_ON_LOOPBACK = """
+import uvicorn
+from itop_mcp_server import server
+assert server.MCP_HOST == "0.0.0.0", server.MCP_HOST
+uvicorn.run(server.mcp.streamable_http_app(), host="127.0.0.1", port=server.MCP_PORT, log_level="warning")
+"""
+
+
+def test_public_url_wins_over_a_wildcard_bind_address(start_server, itop):  # noqa: F811
+    # Inside the container the server binds 0.0.0.0; that address must never show up in what it advertises.
+    server = start_server(["-c", _SERVE_WILDCARD_CONFIG_ON_LOOPBACK], ITOP_BASE_URL=itop.base_url,
+                          MCP_RESOURCE_URL="https://mcp.customer.test/mcp", MCP_HOST="0.0.0.0")
+
+    r = _challenge(server.base_url, "mcp.customer.test")
+
+    assert r.status_code == 401
+    assert _resource_metadata_url(r) == "https://mcp.customer.test/.well-known/oauth-protected-resource/mcp"
+    doc = server.metadata()
+    assert doc["resource"] == "https://mcp.customer.test/mcp"
+    assert "0.0.0.0" not in r.headers["www-authenticate"] + str(doc)
 
 
 # --- MCP_RESOURCE_URL without a port (in-process seam: https://mcp.example.test/mcp) --------
@@ -101,13 +135,47 @@ def test_foreign_origin_is_refused_with_403(mcp_server, itop, origin):
     assert itop.requests == []
 
 
-@pytest.mark.parametrize("loopback", ["localhost", "127.0.0.1"])
+@pytest.mark.parametrize("loopback", ["localhost", "127.0.0.1", "[::1]", "[0:0:0:0:0:0:0:1]", "localhost."])
 def test_loopback_host_keeps_working(mcp_server, itop, loopback):
     port = mcp_server.rsplit(":", 1)[1]
 
     r = _call_whoami(mcp_server, f"{loopback}:{port}")
 
     assert r.status_code == 200, r.text
+
+
+# --- equivalent spellings of the public host: trailing dot of a fully qualified name -----------
+
+@pytest.mark.parametrize("host", ["mcp.example.test.", "mcp.example.test.:443", "MCP.Example.Test.:443"])
+def test_public_host_with_trailing_dot_is_accepted(mcp_server, itop, host):
+    r = _call_whoami(mcp_server, host)
+
+    assert r.status_code == 200, r.text
+    assert "Max Muster" in r.json()["result"]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("origin", ["https://mcp.example.test.", "HTTPS://MCP.Example.Test."])
+def test_public_origin_with_trailing_dot_is_accepted(mcp_server, itop, origin):
+    r = _call_whoami(mcp_server, "mcp.example.test.", origin)
+
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("host", ["evil.test.", "mcp.example.test..", "mcp.example.test.evil.test.",
+                                  "mcp.example.test.:8443", ".", "[mcp.example.test]", "[2001:db8::5"])
+def test_unrelated_or_malformed_host_with_dots_or_brackets_is_refused_with_421(mcp_server, itop, host):
+    r = _call_whoami(mcp_server, host)
+
+    assert r.status_code == 421
+    assert itop.requests == []
+
+
+@pytest.mark.parametrize("origin", ["https://evil.test.", "http://mcp.example.test.", "https://mcp.example.test.."])
+def test_foreign_origin_with_trailing_dot_is_refused_with_403(mcp_server, itop, origin):
+    r = _call_whoami(mcp_server, "mcp.example.test", origin)
+
+    assert r.status_code == 403
+    assert itop.requests == []
 
 
 # --- the host and origin check comes before the token check ----------------------------------
@@ -205,6 +273,43 @@ def test_resource_url_with_default_port_behaves_like_url_without_port(start_serv
     assert _call_whoami(server.base_url, public_host, origin).status_code == 200
     assert _call_whoami(server.base_url, public_host, f"{origin}:{default_port}").status_code == 403
     assert _call_whoami(server.base_url, f"{public_host}:8443").status_code == 421
+
+
+def test_resource_url_with_ipv6_host(start_server, itop):  # noqa: F811
+    server = start_server(ITOP_BASE_URL=itop.base_url, MCP_RESOURCE_URL="https://[2001:db8::5]/mcp",
+                          MCP_HOST="127.0.0.1")
+
+    assert _call_whoami(server.base_url, "[2001:db8::5]").status_code == 200
+    assert _call_whoami(server.base_url, "[2001:db8::5]:443").status_code == 200
+    assert _call_whoami(server.base_url, "[2001:db8::6]").status_code == 421
+
+
+@pytest.mark.parametrize("resource_url", ["https://[2001:db8::5]/mcp", "https://[2001:DB8:0::5]/mcp",
+                                          "https://[2001:0db8:0000:0000:0000:0000:0000:0005]:443/mcp"],
+                         ids=["compressed", "zero-group-capitals", "full-default-port"])
+def test_ipv6_host_is_accepted_in_any_spelling(start_server, itop, resource_url):  # noqa: F811
+    server = start_server(ITOP_BASE_URL=itop.base_url, MCP_RESOURCE_URL=resource_url, MCP_HOST="127.0.0.1")
+
+    for host in ("[2001:db8::5]", "[2001:db8:0::5]", "[2001:DB8:0:0:0:0:0:5]:443", "[2001:0db8::0005]"):
+        r = _call_whoami(server.base_url, host)
+        assert r.status_code == 200, (host, r.text)
+        assert "Max Muster" in r.json()["result"]["content"][0]["text"]
+    assert _call_whoami(server.base_url, "[2001:db8::5]", "https://[2001:db8:0::5]").status_code == 200
+    for host in ("[2001:db8::6]", "[2001:db8:0::5]:8443", "2001:db8::5", "[2001:db8::5]x", "[2001:db8::5]."):
+        assert _call_whoami(server.base_url, host).status_code == 421, host
+    assert _call_whoami(server.base_url, "[2001:db8::5]", "https://[2001:db8::6]").status_code == 403
+
+
+def test_resource_url_with_trailing_dot_accepts_the_name_with_and_without_it(start_server, itop):  # noqa: F811
+    server = start_server(ITOP_BASE_URL=itop.base_url, MCP_RESOURCE_URL="https://mcp.customer.test./mcp",
+                          MCP_HOST="127.0.0.1")
+
+    for host in ("mcp.customer.test", "mcp.customer.test.", "mcp.customer.test:443", "MCP.customer.TEST.:443"):
+        assert _call_whoami(server.base_url, host).status_code == 200, host
+    assert _call_whoami(server.base_url, "mcp.customer.test", "https://mcp.customer.test").status_code == 200
+    assert _call_whoami(server.base_url, "mcp.customer.test", "https://mcp.customer.test.").status_code == 200
+    assert _call_whoami(server.base_url, "evil.test.").status_code == 421
+    assert _call_whoami(server.base_url, "mcp.customer.test..").status_code == 421
 
 
 # --- MCP_RESOURCE_URL must name a host -------------------------------------------------------

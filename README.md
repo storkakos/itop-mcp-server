@@ -138,7 +138,10 @@ terminates TLS on the public host name from `MCP_RESOURCE_URL` and forwards to t
   first, on every path including the `.well-known` metadata, and before the bearer token is looked
   at: a refused request gets `421` or `403` with or without a token (never a `401` challenge), and
   nothing is sent to iTop for it.
-  Letter case does not matter, and the default port (`443` for `https`, `80` for `http`) may be
+  Host and origin are compared in normal form, on the configured and on the incoming side: letter
+  case does not matter, the trailing dot of a fully qualified name is ignored
+  (`mcp.example.com.` is `mcp.example.com`), and IPv6 literals are compared in compressed form
+  (`[2001:db8:0::5]` is `[2001:db8::5]`). The default port (`443` for `https`, `80` for `http`) may be
   present or left out, both in the `Host` header and in `MCP_RESOURCE_URL` (which must still match
   the `itop-mcp` resource in iTop character for character). A non-default port, as
   in `https://mcp.example.com:8443/mcp`, must be in the `Host` header (`mcp.example.com:8443`).

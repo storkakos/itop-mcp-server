@@ -32,11 +32,13 @@ def _env(**config: str) -> dict[str, str]:
     return env
 
 
-def _start(**config: str) -> subprocess.Popen:
+def _start(python_args: list[str] | None = None, **config: str) -> subprocess.Popen:
+    """Start the server as `python -m itop_mcp_server.server`, or as `python <python_args>`."""
     # Output goes to a temp file, not a pipe: nobody reads the pipe while the server runs, and once
     # its buffer is full the server blocks on logging and stops answering.
     output = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
-    proc = subprocess.Popen([sys.executable, "-m", "itop_mcp_server.server"], env=_env(**config),
+    args = python_args or ["-m", "itop_mcp_server.server"]
+    proc = subprocess.Popen([sys.executable, *args], env=_env(**config),
                             stdout=output, stderr=subprocess.STDOUT, text=True)
     proc.output = output
     return proc
@@ -80,10 +82,10 @@ class RunningServer:
 def start_server(tmp_path):
     started: list[RunningServer] = []
 
-    def start(**config: str) -> RunningServer:
+    def start(python_args: list[str] | None = None, **config: str) -> RunningServer:
         port = int(config.setdefault("MCP_PORT", str(free_port())))
         config.setdefault("MCP_AUDIT_LOG", str(tmp_path / "audit.log"))
-        proc = _start(**config)
+        proc = _start(python_args, **config)
         server = RunningServer(proc, f"http://127.0.0.1:{port}")
         started.append(server)
         deadline = time.monotonic() + 20
