@@ -318,14 +318,30 @@ async def search_tickets(text: str = "", status: str = "", ticket_class: str = "
     return _format(await _get(oql, fields, limit))
 
 
+# Felder, die jedes Ticket hat (Klasse Ticket). public_log, status und priority gibt es nur in
+# einigen Unterklassen; iTop lehnt in output_fields jedes Attribut ab, das die abgefragte Klasse
+# nicht hat. Deshalb fragt get_ticket diese Klassen ein zweites Mal mit ihren eigenen Feldern ab.
+_TICKET_FIELDS = ("ref,title,description,operational_status,caller_id_friendlyname,agent_id_friendlyname,"
+                  "team_id_friendlyname,org_id_friendlyname,start_date,last_update")
+_TICKET_CLASS_FIELDS = {
+    "UserRequest": _TICKET_FIELDS + ",status,priority,public_log",
+    "Incident": _TICKET_FIELDS + ",status,priority,public_log",
+}
+
+
 @mcp.tool()
 async def get_ticket(ref: str) -> str:
     """Liest ein Ticket mit Beschreibung und Verlauf (Referenz z.B. R-000123 oder I-000045)."""
-    if not re.fullmatch(r"[A-Z]{1,3}-\d{1,9}", ref.strip()):
+    ref = ref.strip()
+    if not re.fullmatch(r"[A-Z]{1,3}-\d{1,9}", ref):
         return _refuse("Ungueltige Ticketreferenz")
-    res = await _get(f"SELECT Ticket WHERE ref = '{ref.strip()}'",
-                     "ref,title,description,operational_status,caller_id_friendlyname,agent_id_friendlyname,"
-                     "team_id_friendlyname,org_id_friendlyname,start_date,last_update,public_log", 1)
+    res = await _get(f"SELECT Ticket WHERE ref = '{ref}'", _TICKET_FIELDS, 1)
+    objs = (res.get("objects") or {}) if res.get("code") == 0 else {}
+    for obj in objs.values():
+        # Nur Klassennamen aus der festen Liste kommen in die zweite Abfrage, nie iTops Antwort selbst.
+        cls = next((c for c in _TICKET_CLASS_FIELDS if c == obj.get("class")), None)
+        if cls:
+            return _format(await _get(f"SELECT {cls} WHERE ref = '{ref}'", _TICKET_CLASS_FIELDS[cls], 1))
     return _format(res)
 
 

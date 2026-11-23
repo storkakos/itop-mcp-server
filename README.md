@@ -292,7 +292,7 @@ All tools are read-only. Results are capped at `MCP_MAX_ROWS` rows.
 |---|---|
 | `whoami` | Names the iTop person the assistant is acting as |
 | `search_tickets` | Searches tickets by text (title and reference), status and class (`UserRequest`, `Incident`, `Change`, `Problem`, `Ticket`) |
-| `get_ticket` | Reads one ticket by reference (e.g. `R-000123`) with description and public log |
+| `get_ticket` | Reads one ticket by reference (e.g. `R-000123`) with description; for user requests and incidents also status, priority and public log |
 | `oql_query` | Runs a single OQL `SELECT`; anything else is refused before it reaches iTop |
 | `smart_query_v2` | From upstream: turns a natural-language question into an iTop query |
 | `list_operations` | From upstream: lists the operations of iTop's REST API |
