@@ -12,7 +12,8 @@ Fehlt ein Pflichtwert, gibt es keinen Rueckfall auf localhost: der Start bricht 
 Meldung ab, die die Variable nennt.
 
 MCP_RESOURCE_URL muss eine http(s)-URL mit Host sein. Host (und Port) daraus sind die
-oeffentlichen Host-Header-Werte, die der Reverse Proxy durchreicht (public_hosts).
+oeffentlichen Host-Header-Werte, die der Reverse Proxy durchreicht (public_hosts), immer in
+Kleinbuchstaben; der Server vergleicht eingehende Host-/Origin-Header ebenfalls klein.
 """
 from __future__ import annotations
 
@@ -77,8 +78,10 @@ def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
 def _public_host(resource_url: str) -> tuple[tuple[str, ...], str]:
     """Host-Header-Werte und Origin aus MCP_RESOURCE_URL.
 
-    Ohne Port in der URL: "host" und "host:<Standardport>" (Proxys senden beides).
-    Mit Port: nur "host:port".
+    Ohne Port oder mit dem Standardport des Schemas (443/80) in der URL: "host" und
+    "host:<Standardport>" (Proxys senden beides), Origin ohne Port (so senden ihn Browser).
+    Mit anderem Port: nur "host:port".
+    urlsplit liefert Schema und Hostname bereits in Kleinbuchstaben.
     """
     parts = urlsplit(resource_url)
     try:
@@ -88,7 +91,7 @@ def _public_host(resource_url: str) -> tuple[tuple[str, ...], str]:
     if parts.scheme not in DEFAULT_PORTS or not hostname:
         raise ConfigError(f"MCP_RESOURCE_URL muss eine http(s)-URL mit Host sein, ist aber {resource_url!r}")
     host = f"[{hostname}]" if ":" in hostname else hostname
-    if port is None:
+    if port is None or port == DEFAULT_PORTS[parts.scheme]:
         return (host, f"{host}:{DEFAULT_PORTS[parts.scheme]}"), f"{parts.scheme}://{host}"
     return (f"{host}:{port}",), f"{parts.scheme}://{host}:{port}"
 
