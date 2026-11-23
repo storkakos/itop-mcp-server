@@ -107,6 +107,35 @@ Keycloak and LibreChat send the browser to `https://*.example.com` (port 443). F
 four hostnames to the Docker host in your hosts file, publish the proxy on port 443, and trust
 `certs/ca.crt` in your browser (or accept the certificate warning once per hostname).
 
+## In a browser on another machine, without admin rights
+
+Changing the hosts file needs admin rights. On Windows, `browser/open-browser.ps1` does without:
+it starts a browser with its own profile that resolves the four hostnames to the Docker host, and
+it can trust the test CA for your Windows user only.
+
+1. Publish the proxy on port 443 (see above):
+   `docker compose -f compose.yaml -f compose.ports.yaml up -d`
+2. Copy `certs/ca.crt` from the Docker host to your machine.
+3. In PowerShell (no admin rights), in `test-stack/browser/`:
+
+   ```powershell
+   .\open-browser.ps1 -HostIp <Docker host IP> -CaFile <path to ca.crt> -Shortcut
+   ```
+
+   Windows asks once whether to trust the test CA: answer **Yes**. The browser opens
+   `https://chat.example.com` and `https://itop.example.com`; `-Shortcut` puts a desktop shortcut
+   to open it again.
+
+| `-Browser` | How it resolves the hostnames | Note |
+|---|---|---|
+| `firefox` (default) | profile setting `network.dns.forceResolve`: **every** hostname goes to the Docker host | use that profile only for the test stack |
+| `edge`, `chrome` | `--host-resolver-rules` for the four hostnames only | |
+
+The profiles live in `%USERPROFILE%\.itop-mcp-test\`, apart from your normal browser profile. To
+undo: delete that folder and the desktop shortcut, and remove the test CA in `certmgr.msc`
+(Trusted Root Certification Authorities, "itop-mcp test CA"). If the PowerShell execution policy
+blocks the script, start it with `powershell -ExecutionPolicy Bypass -File .\open-browser.ps1 ...`.
+
 ## Notes
 
 - LibreChat limits logins per IP (about 7 in 5 minutes). Running `checks.py` several times in a row
