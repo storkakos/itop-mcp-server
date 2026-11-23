@@ -37,6 +37,8 @@ Prepare iTop before you start the container:
   assistant, the resource entry, web server rewrites and a check list.
 - [**Example setup: Keycloak and LibreChat**](docs/setup/example-keycloak-librechat.md) (optional):
   one way to log into iTop through an identity provider and to connect an MCP client.
+- [**Test stack**](test-stack/README.md) (test only, not for production): both manuals on one Docker
+  host, set up automatically, with a command that runs their check lists.
 
 One thing to get exactly right: in `config-itop.php`, the altioo-oauth-server resource
 `resources` → `itop-mcp` → `url` must be **identical, character by character,** to

@@ -1,0 +1,4 @@
+# Test CA and certificates from make-certs.sh
+certs/
+# Your own LLM key for LibreChat (see README)
+llm.env
