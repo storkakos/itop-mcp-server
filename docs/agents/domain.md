@@ -8,6 +8,8 @@ How the engineering skills should consume this repo's domain documentation when 
 - **`GLOSSARY-MAP.md`** at the repo root if it exists: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
 - **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
 
+"Repo root" means the root of the checkout you are working in (`git rev-parse --show-toplevel`), including a git worktree. `GLOSSARY.md` and `docs/adr/` are committed, so every checkout and worktree has its own copy; read that one, not the main checkout's. (Tickets are different: see `issue-tracker.md`.)
+
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
 ## File structure
