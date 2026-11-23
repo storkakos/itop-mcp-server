@@ -8,7 +8,8 @@ build-backend = "setuptools.build_meta"
 name = "itop-mcp-server"
 description = "MCP server for iTop: read-only tools, every call runs with the caller's own iTop token"
 requires-python = ">=3.13"
-license-files = ["LICENSE-upstream-itop-mcp"]
+license = "MIT"
+license-files = ["LICENSE", "LICENSE-upstream-itop-mcp"]
 dynamic = ["version"]
 # Pinned exactly as tested in the PoC
 dependencies = [

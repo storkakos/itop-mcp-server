@@ -3,6 +3,7 @@
 !requirements.lock
 !requirements-build.lock
 !pyproject.toml
+!LICENSE
 !LICENSE-upstream-itop-mcp
 !src/
 **/__pycache__

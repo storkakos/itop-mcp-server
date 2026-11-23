@@ -20,7 +20,7 @@ ssh -i ~/.ssh/itop-mcp-test-vm -o UserKnownHostsFile=~/.ssh/itop-mcp-test-vm.kno
 
 ## Copy the working tree over
 
-This copies tracked and untracked files but not git-ignored ones, so uncommitted changes come along and `.env`, `logs/` and `.venv/` stay behind:
+This copies tracked and untracked files but not git-ignored ones, so uncommitted changes come along and `.env`, `compose.override.yaml`, `certs/`, `logs/` and `.venv/` stay behind:
 
 ```sh
 SSH="ssh -i ~/.ssh/itop-mcp-test-vm -o UserKnownHostsFile=~/.ssh/itop-mcp-test-vm.known_hosts -o BatchMode=yes root@192.168.178.25"

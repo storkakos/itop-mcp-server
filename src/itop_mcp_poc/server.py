@@ -274,7 +274,7 @@ async def get_ticket(ref: str) -> str:
 @mcp.tool()
 async def oql_query(oql: str, fields: str = "friendlyname", limit: int = 20) -> str:
     """Fuehrt eine lesende OQL-Abfrage aus (nur SELECT). Beispiel: SELECT Server WHERE status='production'.
-    fields: kommagetrennte Attribute oder *. Hoechstens 50 Zeilen."""
+    fields: kommagetrennte Attribute oder *. Der Server kappt bei MCP_MAX_ROWS Zeilen (Standard 50)."""
     if not _READONLY_OQL.match(oql) or ";" in oql:
         return _refuse("oql_query", {"oql": oql, "fields": fields}, "Nur einzelne SELECT-Abfragen sind erlaubt.")
     if not re.fullmatch(r"[A-Za-z0-9_,*\s]{1,400}", fields):

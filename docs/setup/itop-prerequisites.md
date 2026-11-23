@@ -403,7 +403,7 @@ curl -si -X POST https://mcp.example.com/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 ```
 
-**Expected:** `HTTP/1.1 401` and a header like
+**Expected:** `HTTP/1.1 401` (or `HTTP/2 401` behind a proxy with HTTP/2) and a header like
 
 ```
 www-authenticate: Bearer error="invalid_token", error_description="Authentication required", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
@@ -413,9 +413,12 @@ www-authenticate: Bearer error="invalid_token", error_description="Authenticatio
 
 | Result | Fix |
 |---|---|
-| 421 Misdirected Request | The reverse proxy sends a `Host` header that does not match the host in `MCP_RESOURCE_URL`. Pass the public host through. |
 | 502/504 | The reverse proxy cannot reach the MCP server container. |
 | `resource_metadata` with another host or `http://` | `MCP_RESOURCE_URL` is not the public URL. Set it to exactly the URL clients use. |
+
+This check cannot catch a proxy that rewrites the `Host` header: without a token, the server
+answers `401` before it looks at the host. A wrong `Host` shows up only after login, as
+`421 Misdirected Request` on tool calls (see check 5).
 
 ### 3. The protected-resource metadata points at iTop
 
@@ -472,7 +475,8 @@ assistant's tools work.
 | "Unknown application" on the iTop page | Same as above, or the client registered more than 24 hours ago without completing a connection; connect again. |
 | "Personal tokens not allowed" | The user's profiles are not in `personal_tokens_allowed_profiles`. |
 | The user is refused before the consent page | The user has none of the `required_profiles`. |
-| Connected, but every tool call fails | `token` is missing from `allowed_login_types`, or `allow_rest_services_via_tokens` is not `true`. |
+| Login and consent work, but the client never shows "Connected" and keeps asking to connect; `docker logs` shows `Token abgelehnt` | `token` is missing from `allowed_login_types`, or `allow_rest_services_via_tokens` is not `true`. The server checks every request's token with a REST call, so every request gets `401`. |
+| Connected, but tool calls fail with `421 Misdirected Request` | The reverse proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. |
 | "Unknown resource" | See check 4. |
 
 For more detail, raise the extension's log level in `config-itop.php` with

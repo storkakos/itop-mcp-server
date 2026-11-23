@@ -20,7 +20,7 @@ WORKDIR /app
 COPY requirements.lock requirements-build.lock ./
 RUN pip install --no-deps -r requirements.lock \
  && pip install --no-deps -r requirements-build.lock
-COPY pyproject.toml LICENSE-upstream-itop-mcp ./
+COPY pyproject.toml LICENSE LICENSE-upstream-itop-mcp ./
 COPY src ./src
 RUN pip install --no-deps --no-build-isolation . \
  && pip check \

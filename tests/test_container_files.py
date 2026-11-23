@@ -143,7 +143,7 @@ def test_files_read_on_linux_are_pinned_to_lf():
     names = [n for n in tracked.decode("utf-8").split("\0") if n]
     read_on_linux = [n for n in names
                      if n.endswith((".py", ".sh", ".yaml", ".yml", ".toml", ".lock"))
-                     or Path(n).name in ("Dockerfile", ".env.example", ".dockerignore", "LICENSE-upstream-itop-mcp")]
+                     or Path(n).name in ("Dockerfile", ".env.example", ".dockerignore", "LICENSE", "LICENSE-upstream-itop-mcp")]
     assert {"Dockerfile", ".env.example", ".dockerignore", "compose.yaml", "pyproject.toml",
             "requirements.lock", "scripts/smoke-test.sh", "src/itop_mcp_poc/__init__.py"} <= set(read_on_linux)
 

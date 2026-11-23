@@ -4,5 +4,7 @@ __pycache__/
 .pytest_cache/
 logs/
 .env
+compose.override.yaml
+certs/
 .scratch/
 .smoke/

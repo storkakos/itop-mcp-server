@@ -638,5 +638,5 @@ more.
 | Result | Fix |
 |---|---|
 | The model answers without calling a tool | The model does not support tool calls, or the `itop` server is not switched on in this chat. |
-| `Angemeldet in iTop als: ?` | The token works, but the iTop user has no linked Person (**Contact** of the External user), or every tool call fails: see "Connected, but every tool call fails" in check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
+| `Angemeldet in iTop als: ?` | The token works, but the iTop user has no linked Person (**Contact** of the External user). If the client never connects at all, see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
 | Another person's name | The browser was still logged into iTop as someone else when consent was given in check 6, and iTop issued the token for that user. Disconnect **iTop** in LibreChat, log out of iTop, and connect again. Each user should give consent in their own browser session. |

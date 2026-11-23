@@ -113,7 +113,7 @@ with a comment. The container refuses to start when a required value is missing 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MCP_AUDIT_LOG` | `/data/logs/mcp-itop-audit.log` | Audit log path inside the container. Anything outside `/data/logs` is read-only, and the server refuses to start. |
+| `MCP_AUDIT_LOG` | `/data/logs/mcp-itop-audit.log` | Audit log path inside the container. Keep it in `/data/logs`: anywhere else is read-only and the server refuses to start, except `/tmp`, which is writable but lost when the container is recreated. |
 | `MCP_HOST`, `MCP_PORT` | `0.0.0.0`, `8130` | Fixed by `compose.yaml`; setting them in `.env` has no effect. |
 
 After changing `.env`, apply it with `docker compose up -d`.
@@ -127,7 +127,8 @@ terminates TLS on the public host name from `MCP_RESOURCE_URL` and forwards to t
   metadata there); forwarding the whole host is simplest
 - pass the public `Host` header through. The server only accepts its public host name (from
   `MCP_RESOURCE_URL`) and loopback. A request with any other host gets `401` without a token and
-  `421 Misdirected Request` with a valid one.
+  `421 Misdirected Request` with a valid one. Likewise, an `Origin` header (sent by browser-based
+  clients) must be the origin of `MCP_RESOURCE_URL` or loopback, otherwise the request gets `403`.
 - pass the `Authorization` header through unchanged
 
 nginx:
@@ -146,7 +147,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 120s;   # a tool call can wait up to 60 s for iTop
+        proxy_read_timeout 120s;   # each iTop request may take up to 60 s; raise this if iTop is slow
     }
 }
 ```
@@ -192,9 +193,11 @@ read-only and point `SSL_CERT_FILE` at it. Certificate verification is never tur
 4. `docker compose up -d`
 
 The bundle **replaces** the built-in list of public CAs. It must contain the CA that issued iTop's
-certificate (the root, plus intermediates if iTop does not send them). With a wrong or missing
-bundle, every request gets `401` and `docker logs` shows a failed token check
-(`Token-Pruefung fehlgeschlagen … iTop nicht erreichbar`).
+certificate (the root, plus intermediates if iTop does not send them). With a wrong bundle, every
+request gets `401` and `docker logs` shows a failed token check
+(`Token-Pruefung fehlgeschlagen … iTop nicht erreichbar`). If the file named in `SSL_CERT_FILE`
+is missing or unreadable in the container, the log shows
+`Token-Pruefung fehlgeschlagen … No such file or directory` (or `Permission denied`) instead.
 
 ## Update and rollback
 
@@ -226,8 +229,10 @@ version for new or changed settings in `.env.example`.
 
 ## Audit log
 
-Every tool call appends one line to `logs/mcp-itop-audit.log` on the host (`MCP_LOG_DIR`), also for
-calls the server refuses before they reach iTop. The file survives container recreation and updates.
+Tool calls append one line each to `logs/mcp-itop-audit.log` on the host (`MCP_LOG_DIR`), also for
+calls the server refuses before they reach iTop. Exception in this version: if iTop is unreachable
+or answers with an HTTP error, `search_tickets`, `get_ticket` and `oql_query` write no line (the
+error shows in `docker logs`). The file survives container recreation and updates.
 
 ```json
 {"ts": "2026-11-23T09:14:02", "user": "Jane Doe", "token": "3f9a1c0e7b2d", "tool": "search_tickets", "args": {"text": "printer", "status": "", "class": "UserRequest"}, "ok": true, "info": ""}
@@ -236,12 +241,12 @@ calls the server refuses before they reach iTop. The file survives container rec
 | Field | Meaning |
 |---|---|
 | `ts` | Time of the call in the container's time zone (UTC unless you set `TZ`) |
-| `user` | iTop person the token belongs to; `?` for refused input, which never reaches iTop |
+| `user` | iTop person the token belongs to; `?` for refused input (which never reaches iTop) or when iTop names no person for the token |
 | `token` | Short, non-reversible hash of the token, to tell sessions apart. Never the token itself. |
 | `tool` | Tool name |
 | `args` | Tool arguments; long token-like strings are masked as `***` |
 | `ok` | `true` if iTop answered without error |
-| `info` | Error or refusal message, shortened and masked like `args` |
+| `info` | Refusal message, or iTop's error message for `oql_query` and the upstream tools (empty for the others); shortened and masked like `args` |
 
 **Rotation is your job.** The server only appends and never rotates or deletes the file. Use
 logrotate with `copytruncate` (the server keeps no file handle open between calls, but
@@ -297,9 +302,11 @@ More checks with expected output: [check list](docs/setup/itop-prerequisites.md#
 
 ## Licences
 
+- This repository is licensed under the **MIT licence**, see [`LICENSE`](LICENSE).
 - This server is a fork of [cdmx-in/itop-mcp](https://github.com/cdmx-in/itop-mcp), which is under
-  the MIT licence. The upstream licence is kept in
-  [`LICENSE-upstream-itop-mcp`](LICENSE-upstream-itop-mcp) and is installed into the image.
+  the MIT licence too. The upstream licence is kept in
+  [`LICENSE-upstream-itop-mcp`](LICENSE-upstream-itop-mcp). Both licence files are installed into
+  the image.
 - **altioo-oauth-server** is licensed under the **GNU AGPL-3.0-or-later**. It is not part of this
   repository: it runs inside your iTop, and you obtain it from Altioo BV. Read its terms before you
   install or offer it. The other iTop extensions and their licences are listed in
@@ -308,7 +315,8 @@ More checks with expected output: [check list](docs/setup/itop-prerequisites.md#
 ## Development
 
 The tests run without Docker and without a real iTop: they start the server against a small fake
-iTop and talk to it over HTTP like an MCP client.
+iTop and talk to it over HTTP like an MCP client. They need Python 3.13 on Linux (`requirements.lock`
+is resolved for Linux); on Windows, run them in a Linux container or VM.
 
 ```sh
 python -m venv .venv
