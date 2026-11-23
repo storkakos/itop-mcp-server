@@ -6,7 +6,7 @@ A throwaway VM on the maintainer's LAN for running the tests and anything that n
 | --- | --- |
 | Host | `192.168.178.25` (only reachable from the maintainer's network) |
 | User | `root` |
-| OS | Debian 13 (trixie), Docker 29, Compose v5, 4 CPUs, about 16 GB RAM, 10 GB disk |
+| OS | Debian 13 (trixie), Docker 29, Compose v5, 4 CPUs, about 16 GB RAM, 20 GB disk |
 | Private key | `~/.ssh/itop-mcp-test-vm` (on the maintainer's machine, **never commit it**) |
 | Host key | `~/.ssh/itop-mcp-test-vm.known_hosts` |
 
