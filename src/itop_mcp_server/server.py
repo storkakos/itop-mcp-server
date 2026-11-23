@@ -154,7 +154,9 @@ class ITopTokenVerifier(TokenVerifier):
             log.info("Token abgelehnt (%s): code=%s", _token_id(token), res.get("code"))
             return None
         # resource bleibt leer: iTop sagt bei list_operations nicht, fuer welche Resource das Token
-        # ausgestellt wurde. Die Resource-Pruefung des SDK ist deshalb aus (siehe AuthSettings unten).
+        # ausgestellt wurde, und von aussen ist das nicht abfragbar. Die Resource-Pruefung des SDK
+        # ist deshalb aus (siehe AuthSettings unten). Nie mit MCP_RESOURCE_URL fuellen: dann
+        # bestuende jedes Token eine eingeschaltete Pruefung.
         return AccessToken(token=token, client_id="itop-personal-token", scopes=["REST/JSON"])
 
 
@@ -168,9 +170,11 @@ mcp.settings.auth = AuthSettings(
     resource_server_url=MCP_RESOURCE_URL,
     required_scopes=["REST/JSON"],
     # Explizit aus, damit ein SDK-Update (ab 3.0 Default True) nicht still aendert, wer reinkommt.
-    # Das Token wird vom ITopTokenVerifier direkt bei iTop geprueft. Ob altioo Tokens an die
-    # angefragte Resource (RFC 8707) bindet und wir das auslesen koennen, ist offen (Ticket
-    # docker-build 15); erst dann kann die Pruefung an.
+    # Das Token wird vom ITopTokenVerifier direkt bei iTop geprueft. altioo-oauth-server 0.1.0
+    # merkt sich zwar die Resource jeder Verbindung (RFC 8707), gibt sie aber nur als PHP-API in
+    # iTop heraus (TokenAudience): Tokens sind opak, es gibt keine Introspection, und die
+    # Verbindungen darf nur ein Administrator lesen. Wir koennen die Resource also nicht auslesen,
+    # die Pruefung bleibt aus (Ticket docker-build 15, docs/setup/itop-prerequisites.md).
     validate_token_resource=False,
 )
 mcp._token_verifier = ITopTokenVerifier()

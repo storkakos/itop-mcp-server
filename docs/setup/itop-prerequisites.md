@@ -284,6 +284,23 @@ Notes on the values:
   `altioo-oauth-server`) names the callback it asked for. Add it exactly as logged, if the host is
   your client's.
 
+### Which tokens the MCP server accepts
+
+The MCP server accepts every token that iTop's REST/JSON API accepts. It does **not** check which
+resource a token was issued for. altioo-oauth-server records that (each connection stores its
+resource), but it offers it only as a PHP API inside iTop (`TokenAudience`, see its README). The
+tokens are opaque iTop personal tokens, altioo has no introspection endpoint, and the connection
+records are readable by administrators only, so the MCP server cannot ask. (Checked against
+altioo-oauth-server 0.1.0.)
+
+So a token issued through altioo for another entry in `resources`, or a personal token made by hand
+under *My Account* with the `REST/JSON` scope, also works at the MCP server. It gets no more rights
+there than it already has on `rest.php` directly, and the MCP server only reads. To keep the
+assistant to the people meant for it:
+
+- keep `resources` to the single `itop-mcp` entry above, and
+- keep `personal_tokens_allowed_profiles` to the profiles that should use the assistant.
+
 ### Token lifetimes
 
 | Setting | Value | What it means for the user |
