@@ -5,9 +5,12 @@ The container itself is checked by scripts/smoke-test.sh (needs Docker).
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+
+import pytest
 
 import itop_mcp_poc
 
@@ -131,6 +134,8 @@ def test_env_file_switch_is_marked_as_smoke_test_only():
     assert "MCP_ENV_FILE" not in _read(".env.example")
 
 
+@pytest.mark.skipif(shutil.which("git") is None or not (ROOT / ".git").exists(),
+                    reason="needs git and a git checkout (the test VM copy has neither)")
 def test_files_read_on_linux_are_pinned_to_lf():
     # A Windows checkout copied to a Linux Docker host must not carry CRLF into the files the image,
     # compose or the smoke test read. Checked via the git attributes, so it holds whatever core.autocrlf is.
