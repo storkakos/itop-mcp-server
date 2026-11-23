@@ -55,7 +55,26 @@ root_fs_not_writable() { compose exec -T "$SERVICE" sh -c '! touch /app/probe 2>
 # or with SSL_CERT_FILE cleared (= the image's built-in public CAs only).
 https_to_itop() { compose exec -T "$@" "$SERVICE" python -c "import httpx; httpx.get('$ITOP_URL/')" >/dev/null 2>&1; }
 itop_trusted_with_ca() { https_to_itop; }
-itop_refused_without_ca() { ! https_to_itop -e SSL_CERT_FILE=; }
+# Without SSL_CERT_FILE the request must fail on certificate verification itself. Any other outcome
+# (connected, name not resolved, fake iTop down) prints what happened and exits non-zero, so a
+# refused connection cannot pass for "verification stays on".
+itop_cert_refusal() {
+  compose exec -T -e SSL_CERT_FILE= "$SERVICE" python - "$ITOP_URL/" 2>&1 <<'PY'
+import ssl, sys
+import httpx
+try:
+    httpx.get(sys.argv[1])
+except Exception as exc:
+    cause = exc
+    while cause is not None and not isinstance(cause, ssl.SSLCertVerificationError):
+        cause = cause.__cause__ or cause.__context__
+    if cause is None:
+        sys.exit(f"not a certificate error: {exc!r}")
+    print(f"SSLCertVerificationError: {cause.verify_message}")
+else:
+    sys.exit("connected: the certificate was accepted")
+PY
+}
 image_has_no_ssl_cert_file() { [ -z "$(docker run --rm "$RUN_IMAGE" printenv SSL_CERT_FILE)" ]; }
 
 cleanup() {
@@ -140,7 +159,9 @@ fi
 echo "== internal CA (fake iTop on HTTPS, CA mounted read-only, SSL_CERT_FILE=$CA_IN_CONTAINER)"
 check "no SSL_CERT_FILE baked into the image" image_has_no_ssl_cert_file
 check "iTop certificate trusted with the mounted CA" itop_trusted_with_ca
-check "iTop certificate refused without SSL_CERT_FILE (verification stays on)" itop_refused_without_ca
+name="iTop certificate refused without SSL_CERT_FILE (verification stays on)"
+out="$(itop_cert_refusal)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then pass "$name: $out"; else fail "$name" "$out"; fi
 
 echo "== logs"
 check "application log on stdout (docker logs)" startup_logged
