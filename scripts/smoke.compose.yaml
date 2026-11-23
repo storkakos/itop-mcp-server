@@ -1,0 +1,19 @@
+# Overlay for scripts/smoke-test.sh only: adds a fake iTop next to the server so the smoke test
+# can send one request with a valid token (needed to reach the Host-header check, which runs
+# after authentication). No real iTop is involved. Not for production use.
+services:
+  itop-mcp-server:
+    depends_on:
+      - fake-itop
+  fake-itop:
+    image: ${SMOKE_IMAGE:?set by scripts/smoke-test.sh}
+    pull_policy: never
+    command: ["python", "/tests/fake_itop.py"]
+    environment:
+      FAKE_ITOP_TOKENS: ${SMOKE_TOKEN:?set by scripts/smoke-test.sh}
+      PYTHONPATH: /tests
+    volumes:
+      - ./tests:/tests:ro
+    read_only: true
+    cap_drop:
+      - ALL

@@ -1,0 +1,28 @@
+# iTop MCP server.
+#   cp .env.example .env    # set ITOP_BASE_URL and MCP_RESOURCE_URL
+#   docker compose up -d --build
+# Variables in ${...} below are read from .env (or the shell) by docker compose itself.
+services:
+  itop-mcp-server:
+    build: .
+    # Keep this tag equal to __version__ in src/itop_mcp_poc/__init__.py (checked by tests/test_container_files.py).
+    image: itop-mcp-server:0.1.0.dev0
+    env_file: ${MCP_ENV_FILE:-.env}
+    environment:
+      # Fixed inside the container; change the host side with MCP_PUBLISH_PORT.
+      # The audit log uses its default /data/logs/mcp-itop-audit.log, i.e. the mounted folder.
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8130"
+    ports:
+      # Loopback only: the customer's reverse proxy terminates TLS and forwards to this port.
+      - "127.0.0.1:${MCP_PUBLISH_PORT:-8130}:8130"
+    volumes:
+      - ${MCP_LOG_DIR:-./logs}:/data/logs
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -196,13 +197,17 @@ def test_audit_log_goes_to_configured_path(start_server, itop, tmp_path):
 
 
 def test_defaults_for_host_and_audit_log_are_container_friendly():
+    # Without MCP_AUDIT_LOG the server uses /data/logs (the container mount). Outside a container
+    # that folder may or may not be writable, so the server either runs or stops at the audit-log
+    # check; the startup line names the defaults either way. Anything this test creates there is removed.
+    default_log = Path("/data/logs/mcp-itop-audit.log").resolve()
+    existed = {p: p.exists() for p in (default_log, default_log.parent, default_log.parent.parent)}
     port = free_port()
     proc = _start(ITOP_BASE_URL="https://itop.customer.test", MCP_RESOURCE_URL=RESOURCE_URL, MCP_PORT=str(port))
     server = RunningServer(proc, f"http://127.0.0.1:{port}")
     try:
         deadline = time.monotonic() + 20
-        while True:
-            assert proc.poll() is None, _output(proc)
+        while proc.poll() is None:
             try:
                 server.metadata()
                 break
@@ -210,8 +215,56 @@ def test_defaults_for_host_and_audit_log_are_container_friendly():
                 assert time.monotonic() < deadline, "server did not start"
                 time.sleep(0.1)
     finally:
-        output = server.stop()
+        output = server.stop() if proc.poll() is None else _output(proc)
+        for p, was_there in existed.items():
+            if not was_there and p.is_file():
+                p.unlink()
+            elif not was_there and p.is_dir() and not any(p.iterdir()):
+                p.rmdir()
 
     # Listens on all interfaces, and the audit log sits in the data folder, not next to the source code.
     assert f"0.0.0.0:{port}" in output
     assert "/data/logs/mcp-itop-audit.log" in output
+
+
+def test_unwritable_audit_log_stops_startup_and_names_it(tmp_path):
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("a file where the log folder should be", encoding="utf-8")
+
+    result = _run_until_exit(ITOP_BASE_URL="https://itop.customer.test", MCP_RESOURCE_URL=RESOURCE_URL,
+                             MCP_HOST="127.0.0.1", MCP_PORT=str(free_port()),
+                             MCP_AUDIT_LOG=str(blocker / "audit.log"))
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "MCP_AUDIT_LOG" in output
+    assert "nicht beschreibbar" in output
+    assert "Traceback" not in output
+    assert "Uvicorn running" not in output
+
+
+# --- container healthcheck ------------------------------------------------------------------
+
+def _healthcheck(**config: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, "-m", "itop_mcp_poc.healthcheck"], env=_env(**config),
+                          capture_output=True, text=True, timeout=30)
+
+
+@pytest.mark.parametrize("resource_url", [RESOURCE_URL, "https://mcp.customer.test/itop/mcp",
+                                          "https://mcp.customer.test:8443/"])
+def test_healthcheck_passes_against_running_server(start_server, itop, resource_url):
+    server = start_server(ITOP_BASE_URL=itop.base_url, MCP_RESOURCE_URL=resource_url, MCP_HOST="127.0.0.1")
+    port = server.base_url.rsplit(":", 1)[1]
+
+    result = _healthcheck(ITOP_BASE_URL=itop.base_url, MCP_RESOURCE_URL=resource_url, MCP_PORT=port)
+
+    assert result.returncode == 0, result.stderr
+    assert not itop.requests  # needs no token and does not ask iTop
+
+
+def test_healthcheck_fails_without_server():
+    result = _healthcheck(ITOP_BASE_URL="https://itop.customer.test", MCP_RESOURCE_URL=RESOURCE_URL,
+                          MCP_PORT=str(free_port()))
+
+    assert result.returncode == 1
+    assert "unhealthy" in result.stderr

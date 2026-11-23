@@ -97,6 +97,17 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+def main() -> None:
+    """Standalone fake iTop for the container smoke test (scripts/smoke-test.sh).
+
+    FAKE_ITOP_TOKENS: comma-separated tokens to accept; FAKE_ITOP_PORT: listen port (default 8080).
+    """
+    import os
+
+    itop = FakeITop(valid_tokens={t for t in os.environ.get("FAKE_ITOP_TOKENS", "").split(",") if t})
+    uvicorn.run(itop.app(), host="0.0.0.0", port=int(os.environ.get("FAKE_ITOP_PORT", "8080")), log_level="warning")
+
+
 def serve_in_thread(app, port: int) -> uvicorn.Server:
     """Start an ASGI app with uvicorn on 127.0.0.1:<port> in a daemon thread and wait until it is up."""
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
@@ -107,3 +118,7 @@ def serve_in_thread(app, port: int) -> uvicorn.Server:
             raise RuntimeError(f"server on port {port} did not start")
         time.sleep(0.05)
     return server
+
+
+if __name__ == "__main__":
+    main()

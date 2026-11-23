@@ -1,0 +1,8 @@
+*
+!Dockerfile
+!requirements.lock
+!pyproject.toml
+!LICENSE-upstream-itop-mcp
+!src/
+**/__pycache__
+**/*.egg-info

@@ -304,10 +304,26 @@ for _name in UPSTREAM_TOOLS:
     _tool.fn = _audited(_name, _tool.fn)
 
 
+def _check_audit_log_writable() -> None:
+    """Audit-Log beim Start anlegen bzw. oeffnen; nicht beschreibbar -> Abbruch mit Meldung.
+
+    Sonst faellt ein falsch berechtigter Log-Ordner (z. B. ./logs gehoert root, der Container
+    laeuft ohne root) erst beim ersten Tool-Aufruf auf.
+    """
+    try:
+        AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with AUDIT_LOG.open("a", encoding="utf-8"):
+            pass
+    except OSError as e:
+        raise SystemExit(f"Konfigurationsfehler: Audit-Log {CONFIG.audit_log} ist nicht beschreibbar "
+                         f"(MCP_AUDIT_LOG, Ordner und Rechte pruefen): {e.strerror or e}") from None
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     log.info("iTop MCP-Server auf %s, lauscht auf %s:%s (iTop %s, Issuer %s, Audit-Log %s)",
              MCP_RESOURCE_URL, MCP_HOST, MCP_PORT, ITOP_BASE_URL, ITOP_ISSUER, CONFIG.audit_log)
+    _check_audit_log_writable()
     mcp.run(transport="streamable-http")
 
 
