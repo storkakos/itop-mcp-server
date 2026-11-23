@@ -1,0 +1,32 @@
+# Overlay for scripts/smoke-test.sh only: adds a fake iTop next to the server so the smoke test
+# can send one request with a valid token (needed to reach the Host-header check, which runs
+# after authentication). No real iTop is involved. Not for production use.
+# The fake iTop speaks HTTPS with a throwaway test CA; the server gets that CA like a customer with an
+# internal CA would (read-only mount, SSL_CERT_FILE in the env file).
+services:
+  itop-mcp-server:
+    # own tag per smoke project (see RUN_IMAGE in scripts/smoke-test.sh)
+    image: ${SMOKE_IMAGE:?set by scripts/smoke-test.sh}
+    depends_on:
+      - fake-itop
+    volumes:
+      - ${SMOKE_CA_DIR:?set by scripts/smoke-test.sh}/ca.pem:${SMOKE_CA_TARGET:?set by scripts/smoke-test.sh}:ro
+  fake-itop:
+    image: ${SMOKE_IMAGE:?set by scripts/smoke-test.sh}
+    pull_policy: never
+    command: ["python", "/tests/fake_itop.py"]
+    environment:
+      FAKE_ITOP_TOKENS: ${SMOKE_TOKEN:?set by scripts/smoke-test.sh}
+      PYTHONPATH: /tests
+      FAKE_ITOP_SSL_CERTFILE: /certs/server.pem
+      FAKE_ITOP_SSL_KEYFILE: /certs/server-key.pem
+    volumes:
+      - ./tests:/tests:ro
+      - ${SMOKE_CA_DIR:?set by scripts/smoke-test.sh}:/certs:ro
+    # The image's HEALTHCHECK probes the MCP server, which does not run in this container;
+    # left on, the sidecar turns unhealthy and `docker compose up --wait` fails.
+    healthcheck:
+      disable: true
+    read_only: true
+    cap_drop:
+      - ALL

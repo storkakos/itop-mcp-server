@@ -10,6 +10,23 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
+## Where `.scratch/` lives
+
+`.scratch/` is git-ignored. It exists only in the main checkout, never in a git worktree, and never on a branch.
+
+If you work in a worktree (`.scratch/` is missing next to you), find the main checkout through git. The common git directory belongs to the main checkout, so its parent is the main checkout's root:
+
+```sh
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+ls "$MAIN/.scratch/"
+```
+
+`git worktree list` shows the same path: the first entry is always the main checkout. In the main checkout itself, `$MAIN` is just the repo root, so the same commands work everywhere.
+
+### What you may change in the main checkout
+
+From a worktree, change nothing in the main checkout except your own ticket file: claim it, tick its acceptance criteria, resolve it and append comments. Do not edit other tickets, specs or maps, do not touch the main checkout's working tree or branch, and do not commit there. All code and doc changes go into your worktree's branch.
+
 ## When a skill says "publish to the issue tracker"
 
 Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).

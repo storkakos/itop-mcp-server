@@ -54,3 +54,15 @@ def test_protected_resource_metadata_shows_resource_and_issuer(client, itop):
     doc = r.json()
     assert doc["resource"] == RESOURCE_URL
     assert [s.rstrip("/") for s in doc["authorization_servers"]] == [ISSUER]
+
+
+def test_valid_token_is_accepted_without_a_resource_check(client, itop):
+    # The server switches the MCP SDK's RFC 8707 resource check off explicitly: iTop does not tell
+    # which resource a token was issued for, so the verifier reports none. If an SDK update turned
+    # the check on (the 3.0 default), every valid iTop token would be refused here with 401.
+    from itop_mcp_server.server import mcp
+
+    r = client.call_tool("whoami")
+
+    assert r.status_code == 200
+    assert mcp.settings.auth.validate_token_resource is False

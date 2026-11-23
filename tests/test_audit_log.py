@@ -1,36 +1,11 @@
 """Every tool call writes one JSON line to the audit log, and no log ever contains the token."""
 from __future__ import annotations
 
-import json
 import logging
-import os
-from pathlib import Path
 
 import pytest
 
 from conftest import VALID_TOKEN
-
-
-@pytest.fixture
-def audit(mcp_server):
-    """Collects the audit lines written during the test."""
-    return AuditLog(Path(os.environ["MCP_AUDIT_LOG"]))
-
-
-class AuditLog:
-    def __init__(self, path: Path):
-        self.path = path
-        self.start = path.stat().st_size if path.exists() else 0
-
-    def raw(self) -> str:
-        if not self.path.exists():
-            return ""
-        with self.path.open("rb") as f:
-            f.seek(self.start)
-            return f.read().decode("utf-8")
-
-    def entries(self) -> list[dict]:
-        return [json.loads(line) for line in self.raw().splitlines()]
 
 
 def _ok(response) -> str:

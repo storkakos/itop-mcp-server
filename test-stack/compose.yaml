@@ -1,0 +1,151 @@
+# TEST ONLY, NOT FOR PRODUCTION. Reproduces the validation run of docs/setup/ (see README.md).
+# Every password and secret in this folder is a test value.
+#
+#   ./make-certs.sh                   # test CA + certificate for the example hostnames
+#   docker compose up -d --build      # downloads iTop, installs and configures everything
+#   docker compose logs -f setup      # wait for "setup complete"
+#   docker compose run --rm client python checks.py
+name: itop-mcp-test
+
+x-net: &net
+  networks:
+    net: {}
+
+services:
+  # TLS for the four example hostnames. Inside the network the hostnames point here (aliases).
+  proxy:
+    image: caddy:2.10.2
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+    networks:
+      net:
+        aliases: [itop.example.com, sso.example.com, chat.example.com, mcp.example.com]
+
+  db:
+    image: mariadb:11.4.13
+    environment:
+      MARIADB_ROOT_PASSWORD: test-root-pw     # test value
+      MARIADB_DATABASE: itop
+      MARIADB_USER: itop
+      MARIADB_PASSWORD: test-itop-db-pw       # test value
+    volumes:
+      - db:/var/lib/mysql
+    <<: *net
+
+  # iTop 3.2.3 on Apache + mod_php. The entrypoint downloads iTop and the extensions (checked
+  # against the manual's SHA256) and installs a plain iTop; the setup service does the rest.
+  itop:
+    build: ./itop
+    image: itop-mcp-test-itop:3.2.3
+    depends_on: [db]
+    volumes:
+      - itop-www:/var/www/itop
+      - downloads:/downloads
+      - ./certs/ca.crt:/certs/ca.crt:ro
+    <<: *net
+
+  # SMTP for Keycloak's "Verify email". Web UI/API on port 8025 inside the network.
+  mail:
+    image: axllent/mailpit:v1.27
+    <<: *net
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    # start-dev: in-memory-like file database, fine for tests. Behind the proxy with the public URL.
+    command: ["start-dev", "--hostname=https://sso.example.com", "--proxy-headers=xforwarded", "--http-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: test-kc-admin-pw   # test value
+      KC_HEALTH_ENABLED: "true"                       # /health on the management port 9000
+    volumes:
+      - keycloak:/opt/keycloak/data
+    <<: *net
+
+  # The MCP server from this repo (built from the repo root).
+  mcp:
+    build: ..
+    image: itop-mcp-server:test-stack
+    environment:
+      ITOP_BASE_URL: https://itop.example.com
+      MCP_RESOURCE_URL: https://mcp.example.com/mcp
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8130"
+      SSL_CERT_FILE: /etc/itop-mcp/ca.pem
+      MCP_AUDIT_LOG: /tmp/mcp-itop-audit.log
+    volumes:
+      - ./certs/ca.crt:/etc/itop-mcp/ca.pem:ro
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    <<: *net
+
+  # One-shot: runs the manuals' steps (setup wizard, config edits, Keycloak realm, test users).
+  setup:
+    build: ./client
+    image: itop-mcp-test-client:local
+    command: ["python", "setup.py"]
+    depends_on: [proxy, itop, keycloak, mcp, mail]
+    volumes:
+      - itop-www:/var/www/itop
+      - downloads:/downloads:ro
+      - ./certs/ca.crt:/ca.crt:ro
+    environment:
+      REQUESTS_CA_BUNDLE: /ca.crt
+    <<: *net
+
+  mongo:
+    image: mongo:8.0.38
+    command: ["mongod", "--noauth"]
+    volumes:
+      - mongo:/data/db
+    <<: *net
+
+  librechat:
+    image: librechat/librechat:v0.8.9
+    depends_on:
+      mongo:
+        condition: service_started
+      setup:
+        condition: service_completed_successfully
+    env_file:
+      - ./librechat/librechat.env
+      # Your own LLM key, never committed (see README). Without it, check 7 is skipped.
+      - path: ./llm.env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3080"
+      MONGO_URI: mongodb://mongo:27017/LibreChat
+      NODE_EXTRA_CA_CERTS: /certs/ca.crt
+      SEARCH: "false"
+    volumes:
+      - ./librechat/librechat.yaml:/app/librechat.yaml:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
+    <<: *net
+
+  # Runs the check lists: docker compose run --rm client python checks.py
+  client:
+    image: itop-mcp-test-client:local
+    profiles: [checks]
+    command: ["python", "checks.py"]
+    volumes:
+      - itop-www:/var/www/itop:ro      # check 4 reads config-itop.php
+      - ./certs/ca.crt:/ca.crt:ro
+    environment:
+      REQUESTS_CA_BUNDLE: /ca.crt
+    env_file:
+      - path: ./llm.env
+        required: false
+    <<: *net
+
+networks:
+  net: {}
+
+volumes:
+  db: {}
+  itop-www: {}
+  downloads: {}
+  keycloak: {}
+  mongo: {}

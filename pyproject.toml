@@ -1,14 +1,17 @@
 [build-system]
-requires = ["setuptools>=69"]
+# Pinned exactly, like the runtime dependencies. Keep equal to requirements-build.lock, which the
+# Docker image installs and builds with (no build isolation).
+requires = ["setuptools==84.2.1", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "itop-mcp-server"
 description = "MCP server for iTop: read-only tools, every call runs with the caller's own iTop token"
 requires-python = ">=3.13"
-license-files = ["LICENSE-upstream-itop-mcp"]
+license = "MIT"
+license-files = ["LICENSE", "LICENSE-upstream-itop-mcp"]
 dynamic = ["version"]
-# Pinned exactly as tested in the PoC
+# Pinned exactly: the versions this server is tested with
 dependencies = [
     "httpx==0.28.1",
     "mcp[cli]==1.30.0",
@@ -21,13 +24,15 @@ test = [
 ]
 
 [project.scripts]
-itop-mcp-server = "itop_mcp_poc.server:main"
+itop-mcp-server = "itop_mcp_server.server:main"
 
 [tool.setuptools.dynamic]
-version = { attr = "itop_mcp_poc.__version__" }
+version = { attr = "itop_mcp_server.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The server must decide the SDK's token resource check explicitly (ticket docker-build 14).
+filterwarnings = ["error:`AuthSettings.validate_token_resource` is not set:DeprecationWarning"]

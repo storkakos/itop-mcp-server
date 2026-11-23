@@ -1,0 +1,30 @@
+# TEST ONLY. Optional: publish every service of the test stack on the Docker host, to reach it with
+# <host IP>:<port>. Without this file the stack publishes nothing.
+#
+#   docker compose -f compose.yaml -f compose.ports.yaml up -d
+#
+# Every host port can be changed with the variable next to it (shell or a .env file next to
+# compose.yaml), e.g. when another stack on the same host already uses it:
+#   TEST_HTTPS_PORT=8443 TEST_ITOP_PORT=18081 docker compose -f compose.yaml -f compose.ports.yaml up -d
+# Logins and the OAuth flows still need the *.example.com hostnames on port 443 (see README).
+services:
+  proxy:
+    ports: ["${TEST_HTTPS_PORT:-443}:443"]          # all four hostnames, HTTPS
+  itop:
+    ports: ["${TEST_ITOP_PORT:-8081}:80"]           # iTop's Apache, plain HTTP
+  keycloak:
+    ports:
+      - "${TEST_KEYCLOAK_PORT:-8080}:8080"          # Keycloak, plain HTTP (admin console)
+      - "${TEST_KEYCLOAK_MGMT_PORT:-9000}:9000"     # Keycloak management (health, metrics)
+  librechat:
+    ports: ["${TEST_LIBRECHAT_PORT:-3080}:3080"]    # LibreChat, plain HTTP
+  mcp:
+    ports: ["${TEST_MCP_PORT:-8130}:8130"]          # MCP server, plain HTTP
+  mail:
+    ports:
+      - "${TEST_MAIL_UI_PORT:-8025}:8025"           # Mailpit web UI and API (verification mails)
+      - "${TEST_MAIL_SMTP_PORT:-1025}:1025"         # Mailpit SMTP
+  db:
+    ports: ["${TEST_DB_PORT:-3306}:3306"]           # MariaDB (user itop / test-itop-db-pw)
+  mongo:
+    ports: ["${TEST_MONGO_PORT:-27017}:27017"]      # MongoDB (no auth)

@@ -5,6 +5,7 @@ so tests can check what actually reached iTop.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import threading
@@ -14,7 +15,7 @@ from dataclasses import dataclass, field
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
 
@@ -44,31 +45,55 @@ class FakeITop:
     core_get_error: tuple[int, str] | None = None
     # when set, every request gets this HTTP status (simulates a broken iTop)
     http_status: int | None = None
+    # (code, message) returned for list_operations, e.g. to simulate an iTop error answer
+    list_operations_error: tuple[int, str] | None = None
+    # when True, answer with an HTML page instead of JSON (like iTop's login page)
+    html_answer: bool = False
+    # seconds to wait before answering (simulates a slow iTop)
+    delay: float = 0.0
+    # the settings above only apply from this request on (0 = the token check),
+    # so a test can let the token check pass and make the tool's own call fail ...
+    errors_from_request: int = 0
+    # ... and, when set, only up to this many requests in total (1 = the token check)
+    errors_until_request: int | None = None
 
     def reset(self) -> None:
         self.valid_tokens.clear()
         self.requests.clear()
         self.core_get_error = None
         self.http_status = None
+        self.list_operations_error = None
+        self.html_answer = False
+        self.delay = 0.0
+        self.errors_from_request = 0
+        self.errors_until_request = None
 
     def core_gets(self) -> list[ReceivedRequest]:
         return [r for r in self.requests if r.name == "core/get"]
 
-    async def _rest(self, request: Request) -> JSONResponse:
+    async def _rest(self, request: Request) -> Response:
         form = {k: str(v) for k, v in (await request.form()).items()}
         op = json.loads(form.get("json_data", "{}"))
         token = request.headers.get("auth-token")
         self.requests.append(ReceivedRequest(token, dict(request.query_params), form, op))
+        errors_on = self.errors_from_request < len(self.requests) <= (self.errors_until_request or len(self.requests))
 
-        if self.http_status is not None:
+        if errors_on and self.delay:
+            await asyncio.sleep(self.delay)
+        if errors_on and self.http_status is not None:
             return JSONResponse({"error": "broken"}, status_code=self.http_status)
+        if errors_on and self.html_answer:
+            return HTMLResponse("<html><body>iTop login</body></html>")
         if token not in self.valid_tokens:
             return JSONResponse({"code": 1, "message": "Error: Invalid login"})
         if op.get("operation") == "list_operations":
+            if errors_on and self.list_operations_error:
+                code, message = self.list_operations_error
+                return JSONResponse({"code": code, "message": message})
             return JSONResponse({"code": 0, "message": "Operations: 1", "version": "1.3", "operations": []})
         if op.get("operation") == "core/get":
             cls = op.get("class") or "Ticket"
-            if self.core_get_error and cls != "Person":
+            if errors_on and self.core_get_error and cls != "Person":
                 code, message = self.core_get_error
                 return JSONResponse({"code": code, "message": message, "objects": None})
             fields = {"friendlyname": self.person_name} if cls == "Person" else {"ref": "R-000001", "title": "Test"}
@@ -86,9 +111,26 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def serve_in_thread(app, port: int) -> uvicorn.Server:
-    """Start an ASGI app with uvicorn on 127.0.0.1:<port> in a daemon thread and wait until it is up."""
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+def main() -> None:
+    """Standalone fake iTop for the container smoke test (scripts/smoke-test.sh).
+
+    FAKE_ITOP_TOKENS: comma-separated tokens to accept; FAKE_ITOP_PORT: listen port (default 8080).
+    FAKE_ITOP_SSL_CERTFILE / FAKE_ITOP_SSL_KEYFILE: serve HTTPS with this certificate and key.
+    """
+    import os
+
+    itop = FakeITop(valid_tokens={t for t in os.environ.get("FAKE_ITOP_TOKENS", "").split(",") if t})
+    uvicorn.run(itop.app(), host="0.0.0.0", port=int(os.environ.get("FAKE_ITOP_PORT", "8080")), log_level="warning",
+                ssl_certfile=os.environ.get("FAKE_ITOP_SSL_CERTFILE") or None,
+                ssl_keyfile=os.environ.get("FAKE_ITOP_SSL_KEYFILE") or None)
+
+
+def serve_in_thread(app, port: int, **uvicorn_options) -> uvicorn.Server:
+    """Start an ASGI app with uvicorn on 127.0.0.1:<port> in a daemon thread and wait until it is up.
+
+    uvicorn_options go to uvicorn.Config, e.g. ssl_certfile/ssl_keyfile to serve HTTPS.
+    """
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", **uvicorn_options))
     threading.Thread(target=server.run, daemon=True).start()
     deadline = time.monotonic() + 10
     while not server.started:
@@ -96,3 +138,7 @@ def serve_in_thread(app, port: int) -> uvicorn.Server:
             raise RuntimeError(f"server on port {port} did not start")
         time.sleep(0.05)
     return server
+
+
+if __name__ == "__main__":
+    main()
