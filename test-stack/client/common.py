@@ -1,4 +1,5 @@
 """TEST ONLY. Shared values and helpers of the test stack. Every password and secret here is a test value."""
+import os
 import re
 import time
 from urllib.parse import urljoin, urlparse
@@ -13,9 +14,18 @@ CHAT = "https://chat.example.com"
 # flows and config edits all use these values, so the check list runs unchanged against another
 # hostname or path once the stack (compose.yaml, Caddyfile, librechat.yaml, certificate) matches.
 MCP = "https://mcp.example.com/mcp"
-_mcp = urlparse(MCP)
-# Protected resource metadata (RFC 9728): the well-known path goes between origin and the URL's path.
-MCP_METADATA = f"{_mcp.scheme}://{_mcp.netloc}/.well-known/oauth-protected-resource{_mcp.path}"
+# The same server under a path prefix, behind the README's nginx block for that case. Set only by the
+# nginx variant (compose.nginx.yaml); without it the path-prefix check is skipped.
+MCP_PREFIX = os.environ.get("TEST_MCP_PREFIX_URL", "")
+
+
+def metadata_url(resource: str) -> str:
+    """Protected resource metadata (RFC 9728): the well-known path goes between origin and the URL's path."""
+    u = urlparse(resource)
+    return f"{u.scheme}://{u.netloc}/.well-known/oauth-protected-resource{u.path}"
+
+
+MCP_METADATA = metadata_url(MCP)
 REALM = "example"
 CONFIG = "/var/www/itop/conf/production/config-itop.php"
 

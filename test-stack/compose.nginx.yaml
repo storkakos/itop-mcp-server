@@ -1,0 +1,42 @@
+# TEST ONLY. nginx variant of the test stack: nginx replaces Caddy as TLS proxy, with the same
+# hostnames and certificates. The server block of mcp.example.com is built at start-up from the
+# nginx blocks of the README (nginx/start.sh), including the variant under a path prefix, served
+# by a second MCP server (mcp-prefix). See README.md, "nginx as TLS proxy".
+#
+#   docker compose -f compose.yaml -f compose.nginx.yaml up -d --build
+#   docker compose -f compose.yaml -f compose.nginx.yaml run --rm client python checks.py
+services:
+  proxy:
+    image: nginx:1.30.8
+    entrypoint: ["sh", "/stack/start.sh"]
+    depends_on: [mcp, mcp-prefix]
+    volumes: !override
+      - ../README.md:/stack/README.md:ro
+      - ./nginx/start.sh:/stack/start.sh:ro
+      - ./nginx/stack.conf:/etc/nginx/conf.d/stack.conf:ro
+      - ./nginx/proxy-headers.conf:/etc/nginx/stack/proxy-headers.conf:ro
+      - ./certs:/certs:ro
+
+  # The MCP server again, published under a path prefix of mcp.example.com (README, path prefix).
+  mcp-prefix:
+    build: ..                           # the same image as mcp (cached)
+    image: itop-mcp-server:test-stack
+    environment:
+      ITOP_BASE_URL: https://itop.example.com
+      MCP_RESOURCE_URL: https://mcp.example.com/itop-mcp/mcp
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8130"
+      SSL_CERT_FILE: /etc/itop-mcp/ca.pem
+      MCP_AUDIT_LOG: /tmp/mcp-itop-audit.log
+    volumes:
+      - ./certs/ca.crt:/etc/itop-mcp/ca.pem:ro
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      net: {}
+
+  client:
+    environment:
+      TEST_MCP_PREFIX_URL: https://mcp.example.com/itop-mcp/mcp   # turns on the path-prefix check
