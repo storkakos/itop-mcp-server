@@ -1,7 +1,7 @@
 """TEST ONLY. Shared values and helpers of the test stack. Every password and secret here is a test value."""
 import re
 import time
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,7 +9,13 @@ from bs4 import BeautifulSoup
 ITOP = "https://itop.example.com"
 SSO = "https://sso.example.com"
 CHAT = "https://chat.example.com"
+# The MCP server's public URL (its MCP_RESOURCE_URL). The only place the test client names it: checks,
+# flows and config edits all use these values, so the check list runs unchanged against another
+# hostname or path once the stack (compose.yaml, Caddyfile, librechat.yaml, certificate) matches.
 MCP = "https://mcp.example.com/mcp"
+_mcp = urlparse(MCP)
+# Protected resource metadata (RFC 9728): the well-known path goes between origin and the URL's path.
+MCP_METADATA = f"{_mcp.scheme}://{_mcp.netloc}/.well-known/oauth-protected-resource{_mcp.path}"
 REALM = "example"
 CONFIG = "/var/www/itop/conf/production/config-itop.php"
 

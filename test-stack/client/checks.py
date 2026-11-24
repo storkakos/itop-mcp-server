@@ -13,7 +13,8 @@ import requests
 from bs4 import BeautifulSoup
 
 import flows
-from common import CONFIG, ITOP, KC_USERS, LOCAL_USER, MCP, REALM, SSO, browser, follow, kc_admin, page_text
+from common import (CONFIG, ITOP, KC_USERS, LOCAL_USER, MCP, MCP_METADATA, REALM, SSO, browser, follow, kc_admin,
+                    page_text)
 
 results = []
 
@@ -53,19 +54,18 @@ def _():
     r = requests.post(MCP, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
                       headers={"Accept": "application/json, text/event-stream"})
     assert r.status_code == 401, r.status_code
-    assert 'resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp"' in r.headers[
-        "www-authenticate"], r.headers["www-authenticate"]
+    assert f'resource_metadata="{MCP_METADATA}"' in r.headers["www-authenticate"], r.headers["www-authenticate"]
 
 
 @check("prerequisites 3: protected-resource metadata points at iTop")
 def _():
-    d = requests.get("https://mcp.example.com/.well-known/oauth-protected-resource/mcp").json()
+    d = requests.get(MCP_METADATA).json()
     assert d["resource"] == MCP and d["authorization_servers"] == [ISSUER], d
 
 
 @check("prerequisites 4: resource URL identical in MCP server, metadata and config-itop.php")
 def _():
-    d = requests.get("https://mcp.example.com/.well-known/oauth-protected-resource/mcp").json()
+    d = requests.get(MCP_METADATA).json()
     m = re.search(r"'itop-mcp' => array\(.*?'url' => '([^']+)'", Path(CONFIG).read_text(), re.S)
     assert m and m.group(1) == d["resource"] == MCP, (m and m.group(1), d["resource"])
 
