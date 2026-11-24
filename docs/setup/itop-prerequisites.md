@@ -57,6 +57,10 @@ manual and in the config snippets.
 | itop-attribute-encrypted-password (only with an identity provider; ships with iTop 3.2.3) | 1.1.1 | 2026-11-23 |
 
 The validation run used Apache 2.4 with mod_php 8.3 behind a TLS-terminating reverse proxy.
+The [nginx](#nginx) rules and the nginx part of [PHP behind a reverse proxy](#php-behind-a-reverse-proxy)
+were tested by hand on 2026-11-24 with nginx 1.28 and PHP-FPM 8.3 behind the same proxy: the
+discovery URLs, the private extension files and an OAuth run with the iTop login form up to the
+consent page.
 
 Newer versions should work but are untested.
 
@@ -366,24 +370,23 @@ The extension's own `.htaccess` needs `AllowOverride All` for its directory. It 
 
 ### nginx
 
-nginx ignores the extension's `.htaccess`, so add both the rewrite and the deny rule to the iTop
-`server` block:
+nginx ignores the extension's `.htaccess`, so add both the rewrites and the deny rule to the iTop
+`server` block (tested with nginx 1.28 and PHP-FPM 8.3, see [Tested with](#tested-with)):
 
 ```nginx
 # Authorization server metadata (RFC 8414) and its OpenID Connect twin, at the site root
 location ~ ^/\.well-known/(oauth-authorization-server|openid-configuration)/env-production/altioo-oauth-server$ {
-	rewrite ^ /env-production/altioo-oauth-server/index.php?route=$1 last;
-}
-
-# The same metadata inside the issuer path
-location ~ ^/env-production/altioo-oauth-server/\.well-known/(oauth-authorization-server|openid-configuration)$ {
-	rewrite ^ /env-production/altioo-oauth-server/index.php?route=$1 last;
+	rewrite ^/\.well-known/([^/]+)/ /env-production/altioo-oauth-server/index.php?route=$1 last;
 }
 
 # Everything else in the extension's directory except index.php is private
 location ^~ /env-production/altioo-oauth-server/ {
+	# The same metadata inside the issuer path
+	location ~ ^/env-production/altioo-oauth-server/\.well-known/(oauth-authorization-server|openid-configuration)$ {
+		rewrite ^/env-production/altioo-oauth-server/\.well-known/(.+)$ /env-production/altioo-oauth-server/index.php?route=$1 last;
+	}
 	location = /env-production/altioo-oauth-server/index.php {
-		# same PHP handling as the rest of iTop, e.g.:
+		# same PHP handling as the rest of iTop, including "PHP behind a reverse proxy", e.g.:
 		include fastcgi_params;
 		fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
 		fastcgi_pass php-fpm;
@@ -392,7 +395,12 @@ location ^~ /env-production/altioo-oauth-server/ {
 }
 ```
 
-Adjust `fastcgi_pass` to your PHP-FPM upstream.
+Adjust `fastcgi_pass` to your PHP-FPM upstream. Two details matter:
+
+- Each `rewrite` carries its own regex with the capture. A bare `rewrite ^ ...$1` resets the
+  captures of the `location`, so the route is empty and the extension answers "unknown endpoint".
+- The rule for the issuer path sits **inside** the `^~` block. The `^~` prefix stops nginx from
+  checking regex locations outside it, so a rule next to the block is never reached.
 
 ### PHP behind a reverse proxy
 
@@ -423,9 +431,11 @@ SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on
 not enough. Only use `SetEnvIf` on `X-Forwarded-Proto` when the web server is reachable through the
 proxy only.
 
-**nginx** (not tested), in the `location` that passes PHP to PHP-FPM:
+**nginx** (tested), in every `location` that passes PHP to PHP-FPM, including the one for the
+extension's `index.php` in [nginx](#nginx), after `include fastcgi_params;`:
 
 ```nginx
+# Public scheme, host and port, as clients see them
 fastcgi_param HTTPS on;
 fastcgi_param REQUEST_SCHEME https;
 fastcgi_param SERVER_PORT 443;
@@ -483,6 +493,7 @@ curl -s https://itop.example.com/.well-known/oauth-authorization-server/env-prod
 | 404 also for `https://itop.example.com/env-production/altioo-oauth-server/.well-known/openid-configuration` | The extension is not installed: run the setup wizard again and tick it. |
 | 403 | `AllowOverride` is off for the extension's directory (Apache), or the deny rule is too broad (nginx). |
 | iTop login page or HTML | The rewrite points to the wrong path. |
+| 404 with "unknown endpoint" (nginx) | The `rewrite` lost its capture, so the route is empty. Use the rules from [nginx](#nginx) as they are. |
 | `issuer` with `http://` or another host | iTop's `app_root_url` in `config-itop.php` does not match the public URL. Set it to `https://itop.example.com/`. |
 
 ### 2. The MCP server answers 401 and points to its metadata
