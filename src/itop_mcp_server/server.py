@@ -35,7 +35,7 @@ from starlette.responses import PlainTextResponse
 from . import __version__
 from . import upstream_main as upstream
 
-from .config import ConfigError, load_config, normalise_host
+from .config import ConfigError, alternative_ipv4, load_config, normalise_host
 
 # Konfiguration beim Import lesen: fehlt ein Pflichtwert, bricht der Start hier ab
 # (Meldung nennt die Variable, kein Traceback, kein Rueckfall auf localhost).
@@ -225,6 +225,20 @@ def _normal_origin(value: str) -> str:
     return scheme + sep + _normal_host_header(host) if sep else value.lower()
 
 
+def _alternative_ipv4_host(value: str) -> bool:
+    """Is the host of a Host header value ("host[:port]") an IPv4 address not written as a dotted quad
+    (config.alternative_ipv4)? Bracketed values are IPv6 literals and never count."""
+    return not value.startswith("[") and value.count(":") <= 1 and alternative_ipv4(value.partition(":")[0])
+
+
+def _alternative_ipv4_origin(value: str) -> bool:
+    scheme, sep, host = value.partition("://")
+    return bool(sep) and _alternative_ipv4_host(host)
+
+
+_NOT_DOTTED_QUAD = "IPv4 address not written as a dotted quad (e.g. 127.0.0.1)"
+
+
 class _HostOriginCheck:
     """Refuses a foreign Host (421) or Origin (403) before anything else runs.
 
@@ -232,6 +246,8 @@ class _HostOriginCheck:
     qualified name may end in a dot, and an IPv6 literal can be written in several ways. Both headers
     are therefore brought into normal form first, the form CONFIG.public_hosts/public_origin are in
     (config.normalise_host), and passed on in that form, so the SDK's exact-match check agrees.
+    An IPv4 address in any other spelling than a dotted quad (127.1, 0x7f.0.0.1, 2130706433) is refused
+    with a message that says so, the same rule MCP_RESOURCE_URL follows at startup.
     """
 
     _NORMALISE = {b"host": _normal_host_header, b"origin": _normal_origin}
@@ -248,8 +264,12 @@ class _HostOriginCheck:
             host = found.get(b"host", b"").decode("latin-1")
             origin = found.get(b"origin", b"").decode("latin-1")
             refusal = None
-            if not _allowed(host, _ALLOWED_HOSTS):
+            if _alternative_ipv4_host(host):
+                refusal = (421, f"Invalid Host header: {_NOT_DOTTED_QUAD}")
+            elif not _allowed(host, _ALLOWED_HOSTS):
                 refusal = (421, "Invalid Host header")
+            elif origin and _alternative_ipv4_origin(origin):
+                refusal = (403, f"Invalid Origin header: {_NOT_DOTTED_QUAD}")
             elif origin and not _allowed(origin, _ALLOWED_ORIGINS):
                 refusal = (403, "Invalid Origin header")
             if refusal is not None:
