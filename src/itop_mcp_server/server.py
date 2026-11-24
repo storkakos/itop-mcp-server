@@ -30,11 +30,12 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.responses import PlainTextResponse
 
 from . import __version__
 from . import upstream_main as upstream
 
-from .config import ConfigError, load_config
+from .config import ConfigError, alternative_ipv4, load_config, normalise_host
 
 # Konfiguration beim Import lesen: fehlt ein Pflichtwert, bricht der Start hier ab
 # (Meldung nennt die Variable, kein Traceback, kein Rueckfall auf localhost).
@@ -179,44 +180,116 @@ mcp.settings.auth = AuthSettings(
 )
 mcp._token_verifier = ITopTokenVerifier()
 
-# DNS-Rebinding-Schutz: upstream erzeugt FastMCP mit Host 127.0.0.1, dadurch sind nur Loopback-Hosts
-# erlaubt, und das spaetere Setzen von settings.host aendert daran nichts. Hinter dem Reverse Proxy
-# kommt aber der oeffentliche Name aus MCP_RESOURCE_URL im Host-Header an. Den zusaetzlich erlauben;
-# alle anderen Hosts bleiben gesperrt (421). Loopback bleibt fuer den Container-Healthcheck.
+# DNS-rebinding protection. Allowed: loopback (container healthcheck) and the public host and origin
+# from MCP_RESOURCE_URL (requests through the reverse proxy); every other Host gets 421, every other
+# Origin 403. Upstream creates FastMCP with host 127.0.0.1, which allows loopback only, and setting
+# settings.host later does not change that, so the lists are set here. The SDK runs its check inside
+# the /mcp route, after its bearer auth: a foreign host would get 401 without a token, and with one the
+# token would be checked with iTop first. _HostOriginCheck therefore runs as the outermost layer, on
+# every route (.well-known too), before any token is looked at. The SDK's own check stays on with the
+# same lists as a second line.
+_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*", *CONFIG.public_hosts]
+_ALLOWED_ORIGINS = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*", CONFIG.public_origin]
 mcp.settings.transport_security = TransportSecuritySettings(
     enable_dns_rebinding_protection=True,
-    allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*", *CONFIG.public_hosts],
-    allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*", CONFIG.public_origin],
+    allowed_hosts=_ALLOWED_HOSTS,
+    allowed_origins=_ALLOWED_ORIGINS,
 )
 
 
-class _LowercaseHostOrigin:
-    """Schreibt Host- und Origin-Header in Kleinbuchstaben, bevor das SDK sie prueft.
+def _allowed(value: str, patterns: list[str]) -> bool:
+    """Same rule as the SDK: an exact match, or "base:*" for base with any port."""
+    return any(value == p or (p.endswith(":*") and value.startswith(p[:-1])) for p in patterns)
 
-    Hostnamen und Schema sind case-insensitiv, der Vergleich im SDK (TransportSecurityMiddleware)
-    aber nicht: "MCP.Example.com" bekaeme sonst 421. CONFIG.public_hosts/public_origin sind schon
-    klein, ein Origin hat keinen Pfad, also aendert das Kleinschreiben nichts an der Bedeutung.
+
+def _normal_host_header(value: str) -> str:
+    """A Host header value ("host", "host:port", "[ipv6]", "[ipv6]:port") with its host in normal form
+    (normalise_host: lower case, no trailing dot, IPv6 compressed). A value it cannot split is only
+    lower-cased; it then matches no allowed host and is refused."""
+    value = value.lower()
+    if value.startswith("["):
+        end = value.find("]")
+        rest = value[end + 1:]
+        if end == -1 or (rest and not rest.startswith(":")):
+            return value
+        return f"[{normalise_host(value[1:end])}]{rest}"
+    if value.count(":") > 1:  # an IPv6 literal must be in brackets
+        return value
+    host, sep, port = value.partition(":")
+    return normalise_host(host) + sep + port
+
+
+def _normal_origin(value: str) -> str:
+    """An Origin header value (scheme://host[:port], no path) with its host in normal form."""
+    scheme, sep, host = value.lower().partition("://")
+    return scheme + sep + _normal_host_header(host) if sep else value.lower()
+
+
+def _alternative_ipv4_host(value: str) -> bool:
+    """Is the host of a Host header value ("host[:port]") an IPv4 address not written as a dotted quad
+    (config.alternative_ipv4)? Bracketed values are IPv6 literals and never count."""
+    return not value.startswith("[") and value.count(":") <= 1 and alternative_ipv4(value.partition(":")[0])
+
+
+def _alternative_ipv4_origin(value: str) -> bool:
+    scheme, sep, host = value.partition("://")
+    return bool(sep) and _alternative_ipv4_host(host)
+
+
+_NOT_DOTTED_QUAD = "IPv4 address not written as a dotted quad (e.g. 127.0.0.1)"
+
+
+class _HostOriginCheck:
+    """Refuses a foreign Host (421) or Origin (403) before anything else runs.
+
+    Equivalent spellings of a host are one host: names and schemes are case-insensitive, a fully
+    qualified name may end in a dot, and an IPv6 literal can be written in several ways. Both headers
+    are therefore brought into normal form first, the form CONFIG.public_hosts/public_origin are in
+    (config.normalise_host), and passed on in that form, so the SDK's exact-match check agrees.
+    An IPv4 address in any other spelling than a dotted quad (127.1, 0x7f.0.0.1, 2130706433) is refused
+    with a message that says so, the same rule MCP_RESOURCE_URL follows at startup.
     """
 
-    _HEADERS = (b"host", b"origin")
+    _NORMALISE = {b"host": _normal_host_header, b"origin": _normal_origin}
 
     def __init__(self, app: Any) -> None:
         self.app = app
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] in ("http", "websocket"):
-            headers = [(k, v.lower() if k in self._HEADERS else v) for k, v in scope["headers"]]
+            headers = [(k, self._NORMALISE[k](v.decode("latin-1")).encode("latin-1") if k in self._NORMALISE else v)
+                       for k, v in scope["headers"]]
             scope = {**scope, "headers": headers}
+            found = dict(headers)
+            host = found.get(b"host", b"").decode("latin-1")
+            origin = found.get(b"origin", b"").decode("latin-1")
+            refusal = None
+            if _alternative_ipv4_host(host):
+                refusal = (421, f"Invalid Host header: {_NOT_DOTTED_QUAD}")
+            elif not _allowed(host, _ALLOWED_HOSTS):
+                refusal = (421, "Invalid Host header")
+            elif origin and _alternative_ipv4_origin(origin):
+                refusal = (403, f"Invalid Origin header: {_NOT_DOTTED_QUAD}")
+            elif origin and not _allowed(origin, _ALLOWED_ORIGINS):
+                refusal = (403, "Invalid Origin header")
+            if refusal is not None:
+                log.info("Refused request: %s (%s)", refusal[1], host if refusal[0] == 421 else origin)
+                if scope["type"] == "http":
+                    await PlainTextResponse(refusal[1], status_code=refusal[0])(scope, receive, send)
+                else:
+                    await send({"type": "websocket.close", "code": 1008})
+                return
         await self.app(scope, receive, send)
 
 
-# Gilt fuer mcp.run() (ruft self.streamable_http_app()) und fuer die Tests, die die App direkt holen.
+# Applies to mcp.run() (which calls self.streamable_http_app()) and to the tests that take the app directly.
+# add_middleware puts it outside the SDK's authentication middleware, so it runs before any token check.
 _sdk_streamable_http_app = mcp.streamable_http_app
 
 
-def _streamable_http_app():  # noqa: ANN202  (Starlette, wie im SDK)
+def _streamable_http_app():  # noqa: ANN202  (Starlette, as in the SDK)
     app = _sdk_streamable_http_app()
-    app.add_middleware(_LowercaseHostOrigin)
+    app.add_middleware(_HostOriginCheck)
     return app
 
 

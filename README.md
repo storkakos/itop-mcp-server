@@ -132,10 +132,21 @@ terminates TLS on the public host name from `MCP_RESOURCE_URL` and forwards to t
 - forward both `/mcp` and `/.well-known/oauth-protected-resource/mcp` (MCP clients fetch the
   metadata there); forwarding the whole host is simplest
 - pass the public `Host` header through. The server only accepts its public host name (from
-  `MCP_RESOURCE_URL`) and loopback. A request with any other host gets `401` without a token and
-  `421 Misdirected Request` with a valid one. Likewise, an `Origin` header (sent by browser-based
-  clients) must be the origin of `MCP_RESOURCE_URL` or loopback, otherwise the request gets `403`.
-  Letter case does not matter, and the default port (`443` for `https`, `80` for `http`) may be
+  `MCP_RESOURCE_URL`) and loopback. A request with any other host gets `421 Misdirected Request`.
+  Likewise, an `Origin` header (sent by browser-based clients) must be the origin of
+  `MCP_RESOURCE_URL` or loopback, otherwise the request gets `403 Forbidden`. This check comes
+  first, on every path including the `.well-known` metadata, and before the bearer token is looked
+  at: a refused request gets `421` or `403` with or without a token (never a `401` challenge), and
+  nothing is sent to iTop for it.
+  Host and origin are compared in normal form, on the configured and on the incoming side: letter
+  case does not matter, the trailing dot of a fully qualified name is ignored
+  (`mcp.example.com.` is `mcp.example.com`), and IPv6 literals are compared in compressed form
+  (`[2001:db8:0::5]` is `[2001:db8::5]`). An IPv4 address must be written as a dotted quad
+  (`192.0.2.10`); other spellings that the URL standard and many resolvers also read as IPv4
+  (`192.0.522`, `0xc0.0.2.10`, `0300.0.2.10`, `3221225994`) are refused rather than normalised: in
+  `MCP_RESOURCE_URL` they stop startup with a message naming the setting, in an incoming `Host`
+  header they get `421` and in an `Origin` header `403`, with a message saying the address is not a
+  dotted quad. The default port (`443` for `https`, `80` for `http`) may be
   present or left out, both in the `Host` header and in `MCP_RESOURCE_URL` (which must still match
   the `itop-mcp` resource in iTop character for character). A non-default port, as
   in `https://mcp.example.com:8443/mcp`, must be in the `Host` header (`mcp.example.com:8443`).
@@ -315,7 +326,7 @@ checks and does **not** mean a successful start; look at the lines after it.
 tokens); `Token-Pruefung fehlgeschlagen … iTop nicht erreichbar` means the container cannot reach
 iTop (network, proxy, or certificate, see [Internal CA](#internal-ca)).
 
-**`421 Misdirected Request` through the reverse proxy** (once the client sends a valid token). The
+**`421 Misdirected Request` through the reverse proxy** (on every path, with or without a token). The
 proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. See [Reverse proxy](#reverse-proxy-tls).
 
 **The OAuth flow ends with "Unknown resource" in iTop.** `MCP_RESOURCE_URL` and the `itop-mcp`
@@ -339,7 +350,20 @@ More checks with expected output: [check list](docs/setup/itop-prerequisites.md#
 
 The tests run without Docker and without a real iTop: they start the server against a small fake
 iTop and talk to it over HTTP like an MCP client. They need Python 3.13 on Linux (`requirements.lock`
-is resolved for Linux); on Windows, run them in a Linux container or VM.
+is resolved for Linux).
+
+On the Windows dev machine, never run them locally: one command copies the working tree
+(uncommitted changes included) to the test VM, runs pytest there in a throwaway container, shows the
+result and cleans up. Run it from Git Bash; arguments go to pytest, the exit code is pytest's:
+
+```sh
+bash scripts/test-on-vm.sh
+bash scripts/test-on-vm.sh tests/test_config.py -x
+```
+
+See [docs/agents/test-vm.md](docs/agents/test-vm.md) for the VM, run names and cleanup.
+
+On a Linux machine, run them directly:
 
 ```sh
 python -m venv .venv
