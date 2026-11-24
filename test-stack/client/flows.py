@@ -206,4 +206,5 @@ class LibreChat:
 
 
 def llm_key_present() -> bool:
-    return any(v for k, v in os.environ.items() if k.endswith("_KEY") and k != "REQUESTS_CA_BUNDLE")
+    """An LLM key from llm.env (any *_KEY). GPG_KEY is set by the Python base image, not by llm.env."""
+    return any(v for k, v in os.environ.items() if k.endswith("_KEY") and k != "GPG_KEY")
