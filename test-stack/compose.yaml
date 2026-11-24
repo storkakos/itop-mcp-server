@@ -37,7 +37,7 @@ services:
   # against the manual's SHA256) and installs a plain iTop; the setup service does the rest.
   itop:
     build: ./itop
-    image: itop-mcp-test-itop:3.2.3
+    image: itop-mcp-test-itop:${TEST_TAG:-3.2.3}
     depends_on: [db]
     volumes:
       - itop-www:/var/www/itop
@@ -65,7 +65,7 @@ services:
   # The MCP server from this repo (built from the repo root).
   mcp:
     build: ..
-    image: itop-mcp-server:test-stack
+    image: itop-mcp-server:${TEST_TAG:-test-stack}
     environment:
       ITOP_BASE_URL: https://itop.example.com
       MCP_RESOURCE_URL: https://mcp.example.com/mcp
@@ -84,7 +84,7 @@ services:
   # One-shot: runs the manuals' steps (setup wizard, config edits, Keycloak realm, test users).
   setup:
     build: ./client
-    image: itop-mcp-test-client:local
+    image: itop-mcp-test-client:${TEST_TAG:-local}
     command: ["python", "setup.py"]
     depends_on: [proxy, itop, keycloak, mcp, mail]
     volumes:
@@ -127,7 +127,7 @@ services:
 
   # Runs the check lists: docker compose run --rm client python checks.py
   client:
-    image: itop-mcp-test-client:local
+    image: itop-mcp-test-client:${TEST_TAG:-local}
     profiles: [checks]
     command: ["python", "checks.py"]
     volumes:

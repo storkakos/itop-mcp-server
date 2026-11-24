@@ -13,7 +13,8 @@ import requests
 from bs4 import BeautifulSoup
 
 import flows
-from common import (CONFIG, ITOP, KC_USERS, LOCAL_USER, MCP, MCP_METADATA, MCP_PREFIX, REALM, SSO, browser, follow,
+import keycloak_realm
+from common import (CHAT, CONFIG, ITOP, KC_USERS, LOCAL_USER, MCP, MCP_METADATA, MCP_PREFIX, REALM, SSO, browser, follow,
                     kc_admin, metadata_url, page_text)
 
 results = []
@@ -196,7 +197,7 @@ def _librechat(user):
     me = lc.login()
     assert me.get("email") == user[4], me
     chats[user[0]] = lc
-    return f"{me.get('name')} <{me.get('email')}>, PKCE {lc.pkce}"
+    return f"{me.get('name')} <{me.get('email')}>, PKCE {lc.pkce}, LibreChat login requests left {lc.login_budget}"
 
 
 @check("example 5: a Keycloak user logs into LibreChat")
@@ -241,6 +242,57 @@ def _():
     _librechat(bob)
     chats[bob[0]].connect_itop()
     return _whoami_chat(bob)
+
+
+@check("example setup: running the Keycloak setup again keeps client settings it does not own")
+def _():
+    # Another stack's or an admin's settings on the librechat client, then the stack's own setup again.
+    kc = kc_admin()
+    base = f"{SSO}/admin/realms/{REALM}/clients"
+    url = f"{base}/{kc.get(base, params={'clientId': 'librechat'}).json()[0]['id']}"
+    other = "https://other.example.com"
+    rep = kc.get(url).json()
+    rep["attributes"]["test.foreign.attribute"] = "kept"
+    rep["attributes"]["post.logout.redirect.uris"] += f"##{other}/login"
+    rep["redirectUris"] = rep["redirectUris"] + [f"{other}/callback"]
+    assert kc.put(url, json=rep).status_code == 204
+    try:
+        keycloak_realm.setup_realm()
+        after = kc.get(url).json()
+        logout_uris = after["attributes"].get("post.logout.redirect.uris", "").split("##")
+        assert after["attributes"].get("test.foreign.attribute") == "kept", after["attributes"]
+        assert f"{other}/login" in logout_uris and f"{CHAT}/login" in logout_uris, logout_uris
+        assert f"{other}/callback" in after["redirectUris"]             and f"{CHAT}/oauth/openid/callback" in after["redirectUris"], after["redirectUris"]
+    finally:  # back to the stack's own settings
+        rep = kc.get(url).json()
+        rep["attributes"]["test.foreign.attribute"] = ""  # an empty value removes the attribute
+        rep["attributes"]["post.logout.redirect.uris"] = "##".join(
+            x for x in rep["attributes"]["post.logout.redirect.uris"].split("##") if not x.startswith(other))
+        rep["redirectUris"] = [x for x in rep["redirectUris"] if not x.startswith(other)]
+        kc.put(url, json=rep)
+    return "foreign attribute, redirect URI and post-logout redirect URI kept next to the stack's own"
+
+
+@check("example 8: after a LibreChat logout Keycloak asks for a password, and another user logs in")
+def _():
+    # bob's login follows anna's and his own (check 7). LibreChat counts two requests under /oauth/ per login
+    # against its limit of 7 per 5 minutes; if the budget is used up, LibreChat.login waits for the window.
+    lc = chats[bob[0]]
+    out = lc.logout()
+    assert out["end_session"] == f"{SSO}/realms/{REALM}/protocol/openid-connect/logout", out
+    assert out["landed"].startswith(f"{CHAT}/login"), f"after the logout the browser landed on {out['landed']}"
+    gone = lc.b.post(f"{CHAT}/api/auth/refresh")
+    # Without a session LibreChat answers in plain text ("Refresh token not provided"), with one in JSON.
+    assert not (gone.status_code == 200 and gone.headers.get("content-type", "").startswith("application/json")),         "LibreChat session still alive after the logout"
+    # The same browser: Sign in with Keycloak must show Keycloak's login form (LibreChat.login asserts it).
+    switch = flows.LibreChat(anna[0], anna[1])
+    switch.b = lc.b
+    me = switch.login()
+    assert me.get("email") == anna[4], me
+    return (f"Keycloak login form shown again, now {me.get('email')}"
+            + (" (Keycloak asked to confirm the logout)" if out["confirmed"] else "")
+            + f", LibreChat login requests left {switch.login_budget}"
+            + (f", waited {switch.waited} s for LibreChat's login limit" if switch.waited else ""))
 
 
 failed = [r for r in results if r[0] == "FAIL"]
