@@ -13,8 +13,8 @@ import requests
 from bs4 import BeautifulSoup
 
 import flows
-from common import (CONFIG, ITOP, KC_USERS, LOCAL_USER, MCP, MCP_METADATA, REALM, SSO, browser, follow, kc_admin,
-                    page_text)
+from common import (CONFIG, ITOP, KC_USERS, LOCAL_USER, MCP, MCP_METADATA, MCP_PREFIX, REALM, SSO, browser, follow,
+                    kc_admin, metadata_url, page_text)
 
 results = []
 
@@ -82,6 +82,25 @@ def _():
     for p in ("README.md", "src/", "vendor/autoload.php"):
         code = requests.get(f"{ISSUER}/{p}").status_code
         assert code in (403, 404), f"{p}: {code}"
+
+
+print("== Reverse proxy (README.md)")
+
+
+@check("README: MCP server and its metadata under a path prefix (nginx)")
+def _():
+    if not MCP_PREFIX:
+        return "SKIP only in the nginx variant (compose.nginx.yaml)"
+    meta = metadata_url(MCP_PREFIX)
+    r = requests.post(MCP_PREFIX, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                      headers={"Accept": "application/json, text/event-stream"})
+    assert r.status_code == 401, r.status_code
+    assert f'resource_metadata="{meta}"' in r.headers["www-authenticate"], r.headers["www-authenticate"]
+    d = requests.get(meta).json()
+    assert d["resource"] == MCP_PREFIX and d["authorization_servers"] == [ISSUER], d
+    answer = flows.mcp_call(flows.mcp_token("form", LOCAL_USER[0], LOCAL_USER[1]), "whoami", MCP_PREFIX)
+    assert f"{LOCAL_USER[2]} {LOCAL_USER[3]}" in answer, answer
+    return MCP_PREFIX
 
 
 print("== Example setup (docs/setup/example-keycloak-librechat.md)")

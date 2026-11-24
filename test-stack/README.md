@@ -8,10 +8,11 @@ This stack reproduces the validation run of the two manuals on one Docker host:
 - [iTop prerequisites](../docs/setup/itop-prerequisites.md)
 - [Example setup: Keycloak and LibreChat](../docs/setup/example-keycloak-librechat.md)
 
-It starts a TLS proxy (Caddy) for `itop.example.com`, `sso.example.com`, `chat.example.com` and
-`mcp.example.com`, MariaDB, iTop 3.2.3, Mailpit, Keycloak 26.8.2, MongoDB, LibreChat v0.8.9 and the
-MCP server built from this repo. Inside the stack's network the four hostnames point to the proxy,
-so no hosts file is needed for the checks.
+It starts a TLS proxy (Caddy, or nginx: see [nginx as TLS proxy](#nginx-as-tls-proxy)) for
+`itop.example.com`, `sso.example.com`, `chat.example.com` and `mcp.example.com`, MariaDB, iTop
+3.2.3, Mailpit, Keycloak 26.8.2, MongoDB, LibreChat v0.8.9 and the MCP server built from this repo.
+Inside the stack's network the four hostnames point to the proxy, so no hosts file is needed for
+the checks.
 
 ## What you need
 
@@ -47,6 +48,7 @@ downloads), then the commands above again.
 | Realm `example`, clients `itop` and `librechat`, email lock-down, test users | `client/keycloak_realm.py` (admin REST API, the manual's values) | example, Keycloak sections |
 | LibreChat `.env` and `librechat.yaml` | `librechat/` | example, "LibreChat" |
 | Check lists | `client/checks.py` | both "Check list" sections |
+| nginx in front of the MCP server, also under a path prefix (nginx variant only) | `compose.nginx.yaml`, `nginx/start.sh` | README, "Reverse proxy (TLS)" |
 
 Differences from the manuals, all for a local test: the Keycloak realm is created (the manual
 assumes it exists) with Mailpit as SMTP; the client secrets are fixed test values instead of being
@@ -77,6 +79,39 @@ docker compose up -d librechat        # pick up the key
 
 For another provider, change the endpoint in `librechat/librechat.yaml` and the key name in
 `llm.env`. Without `llm.env`, `checks.py` skips check 7 and says so.
+
+## nginx as TLS proxy
+
+The stack normally runs Caddy as TLS proxy. The nginx variant replaces it with nginx 1.30.8, with
+the same hostnames and certificates, and tests the nginx blocks of the
+[README](../README.md#reverse-proxy-tls). Run it on demand; it is **mandatory before a release**
+(see "Releasing" in the README).
+
+```sh
+cd test-stack
+./make-certs.sh
+docker compose -f compose.yaml -f compose.nginx.yaml up -d --build
+docker compose -f compose.yaml -f compose.nginx.yaml logs -f setup     # wait for "setup complete"
+docker compose -f compose.yaml -f compose.nginx.yaml run --rm client python checks.py
+```
+
+Use both files for every command of this variant. Without `compose.nginx.yaml` the stack runs with
+Caddy as before. To switch an existing stack, `up -d` with the other set of files is enough; the
+volumes stay.
+
+- At start-up, `nginx/start.sh` takes the two nginx code blocks of the README section "Reverse
+  proxy (TLS)" and builds the server block of `mcp.example.com` from them: the proxy in front of the
+  MCP server, with the path-prefix locations inside it. It fills in only what the README leaves to
+  the reader: the upstream (`127.0.0.1:8130` becomes `mcp:8130`, and `mcp-prefix:8130` for the
+  prefix) and the certificate paths. The generated file is printed in `docker compose logs proxy`.
+- If a block is missing or nginx refuses it, the proxy does not start and the check list fails. A
+  block that starts but forwards wrongly fails the checks.
+- `mcp-prefix` is a second MCP server with `MCP_RESOURCE_URL=https://mcp.example.com/itop-mcp/mcp`.
+  The check "README: MCP server and its metadata under a path prefix" runs only in this variant:
+  401 with the prefixed metadata URL, the metadata itself, and whoami with a token. The token comes
+  from the normal OAuth flow; the server does not check the token's resource.
+- `itop.example.com`, `sso.example.com` and `chat.example.com` are plain proxy blocks of the stack
+  (`nginx/stack.conf`). iTop itself stays on Apache.
 
 ## Reach the services with IP and port (optional)
 

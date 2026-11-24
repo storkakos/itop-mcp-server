@@ -64,15 +64,15 @@ def consent(b, r):
     return follow(b, b.post(urljoin(r.url, form.get("action") or r.url), data=d, allow_redirects=False), CALLBACK)
 
 
-def mcp_call(token: str, tool: str) -> str:
+def mcp_call(token: str, tool: str, url: str = MCP) -> str:
     c = requests.Session()
     h = {"Authorization": f"Bearer {token}", "Accept": "application/json, text/event-stream"}
-    r = c.post(MCP, headers=h, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+    r = c.post(url, headers=h, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test-stack", "version": "1"}}})
     r.raise_for_status()
     if r.headers.get("mcp-session-id"):
         h["mcp-session-id"] = r.headers["mcp-session-id"]
-    r = c.post(MCP, headers=h, json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+    r = c.post(url, headers=h, json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                                       "params": {"name": tool, "arguments": {}}})
     m = re.search(r"data: (.*)", r.text)
     body = json.loads(m.group(1)) if m else r.json()
@@ -81,6 +81,11 @@ def mcp_call(token: str, tool: str) -> str:
 
 def mcp_oauth_flow(login: str, user: str, pwd: str) -> str:
     """An MCP client like LibreChat: discovery, registration, login, consent, token, whoami. Returns whoami."""
+    return mcp_call(mcp_token(login, user, pwd), "whoami")
+
+
+def mcp_token(login: str, user: str, pwd: str) -> str:
+    """The OAuth part of mcp_oauth_flow: returns the access token for the MCP server."""
     c = requests.Session()
     r = c.post(MCP, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
                headers={"Accept": "application/json, text/event-stream"})
@@ -112,7 +117,7 @@ def mcp_oauth_flow(login: str, user: str, pwd: str) -> str:
         "grant_type": "authorization_code", "code": q["code"][0], "redirect_uri": CALLBACK,
         "client_id": client_id, "code_verifier": verifier, "resource": prm["resource"]})
     assert tok.status_code == 200, tok.text[:200]
-    return mcp_call(tok.json()["access_token"], "whoami")
+    return tok.json()["access_token"]
 
 
 def itop_keycloak_login(user: str, pwd: str) -> str:

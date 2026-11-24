@@ -173,6 +173,31 @@ server {
 }
 ```
 
+nginx, under a path prefix of a host that serves other things too, e.g.
+`MCP_RESOURCE_URL=https://apps.example.com/itop-mcp/mcp`. Put both locations into the existing
+`server` block of that host. The first strips the prefix (the server answers on `/mcp`), the
+second forwards the protected resource metadata unchanged: MCP clients fetch it at the site root,
+with the prefix after `/.well-known/oauth-protected-resource`.
+
+```nginx
+location /itop-mcp/ {
+    proxy_pass http://127.0.0.1:8130/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+}
+location = /.well-known/oauth-protected-resource/itop-mcp/mcp {
+    proxy_pass http://127.0.0.1:8130;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Both nginx blocks are tested: the [test stack](test-stack/README.md#nginx-as-tls-proxy) builds its
+nginx configuration from them.
+
 Apache (`mod_proxy`, `mod_proxy_http`, `mod_ssl`):
 
 ```apache
@@ -390,4 +415,6 @@ scripts/smoke-test.sh
 ```
 
 Releasing: set `__version__` in `src/itop_mcp_server/__init__.py` and the image tag in `compose.yaml`
-to the same version (a test checks this), run both test suites, then tag `vX.Y.Z`.
+to the same version (a test checks this), run both test suites and the check list of the
+[test stack](test-stack/README.md) with Caddy and with [nginx](test-stack/README.md#nginx-as-tls-proxy),
+then tag `vX.Y.Z`.
