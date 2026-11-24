@@ -6,7 +6,7 @@ A throwaway VM on the maintainer's LAN for running the tests and anything that n
 | --- | --- |
 | Host | `192.168.178.25` (only reachable from the maintainer's network) |
 | User | `root` |
-| OS | Debian 13 (trixie), Docker 29, Compose v5, 4 CPUs, about 16 GB RAM, 20 GB disk |
+| OS | Debian 13 (trixie), Docker 29, Compose v5, 4 CPUs, 12 GB RAM minimum with ballooning (about 11 GB visible), no swap, 59 GB root disk |
 | Private key | `~/.ssh/itop-mcp-test-vm` (on the maintainer's machine, **never commit it**) |
 | Host key | `~/.ssh/itop-mcp-test-vm.known_hosts` |
 
@@ -35,6 +35,15 @@ The sections below are the manual steps, for the smoke test and for debugging.
 SSH="ssh -i ~/.ssh/itop-mcp-test-vm -o UserKnownHostsFile=~/.ssh/itop-mcp-test-vm.known_hosts -o BatchMode=yes root@192.168.178.25"
 $SSH
 ```
+
+## Sharing the VM
+
+The VM's RAM, not the number of agents, limits how many runs fit at once. It has no swap; when RAM runs out, SSH stops answering for many minutes and the kernel kills containers of other runs.
+
+- A **ticket stack** is a full test stack started for one ticket under its own RUN name. Starting one takes a **VM slot**.
+- At most 3 ticket stacks run at the same time. Start one only if at least 3 GB are available: `$SSH "free -m | awk '/^Mem:/{print \$7}'"` must print 3072 or more. If not, wait or ask the orchestrator.
+- Take your stack down right after the run, also when it failed: `docker compose -p $RUN down -v --remove-orphans`, then remove your images (see Clean up).
+- Never stop, change or read stacks, folders or files you did not create, including other stacks' `.env` and key files. Some stacks on the VM run permanently on purpose.
 
 ## Your own run: folder, project name, port
 

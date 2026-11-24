@@ -27,6 +27,19 @@ ls "$MAIN/.scratch/"
 
 From a worktree, change nothing in the main checkout except your own ticket file: claim it, tick its acceptance criteria, resolve it and append comments. Do not edit other tickets, specs or maps, do not touch the main checkout's working tree or branch, and do not commit there. All code and doc changes go into your worktree's branch.
 
+## Working on a ticket next to other agents
+
+- Before you resolve a ticket, rebase your branch onto the current target branch. If the rebase brought in changes to files you touched, run the affected tests or checks on the test VM again and note that second run in the ticket.
+- A ticket never asks you to change a ticket or file of another repo. If something has to be handed over to another repo, write it in your own ticket under a heading `## Handover to <repo> <NN>`. The orchestrator carries it over when it merges your branch.
+- Criteria about code (lint, tests) only apply when code changed. Write them that way, e.g. "If PHP files changed, the PHP lint passes", so a docs-only ticket is not left with a criterion nobody can tick.
+
+## Terms
+
+- **Orchestrator**: the session that hands out tickets to ticket agents, reviews their branches and merges them.
+- **Ticket agent**: an agent that works on exactly one ticket, in its own git worktree on a branch `ticket/<id>`.
+- **Twin ticket**: the matching ticket in a sibling repo. It names the leading ticket under Blocked by and reuses its solution instead of working it out again.
+- **Handover**: what one ticket passes on to a ticket in another repo, written in its own ticket (see above).
+
 ## When a skill says "publish to the issue tracker"
 
 Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
