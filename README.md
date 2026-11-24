@@ -329,6 +329,15 @@ iTop (network, proxy, or certificate, see [Internal CA](#internal-ca)).
 **`421 Misdirected Request` through the reverse proxy** (on every path, with or without a token). The
 proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. See [Reverse proxy](#reverse-proxy-tls).
 
+**The consent page says "Not available for your account" – "Your profiles do not give access to what
+this application asks for".** The iTop user on the consent page has none of the profiles allowed to
+connect (`required_profiles` of the `itop-mcp` resource, and `personal_tokens_allowed_profiles`).
+For `Administrator` this is by design. An administrator grants access by giving the user one of those
+profiles in iTop. If the user already has them, the browser still holds an iTop session of someone
+else (for example the admin): the consent page uses that session, not the LibreChat user. Log out of
+iTop, use a private browser window, or log into iTop as the intended user first, then connect again.
+See [check 5 of the prerequisites](docs/setup/itop-prerequisites.md#5-an-mcp-client-can-connect).
+
 **The OAuth flow ends with "Unknown resource" in iTop.** `MCP_RESOURCE_URL` and the `itop-mcp`
 resource in `config-itop.php` differ. See [Prerequisites on the iTop side](#prerequisites-on-the-itop-side).
 

@@ -612,7 +612,7 @@ at Keycloak, and land on the altioo-oauth-server **consent page** naming the cli
 | Result | Fix |
 |---|---|
 | After the Keycloak login you land on iTop's home page instead of the consent page | iTop and hybridauth return to the page you came from only if its URL, as PHP sees it, starts with iTop's `app_root_url`. Behind a reverse proxy that terminates TLS, PHP sees `http` and port 80. See [PHP behind a reverse proxy](itop-prerequisites.md#php-behind-a-reverse-proxy) in the prerequisites; it covers both iTop's own login and hybridauth. Then start the connection in the client again. |
-| "Personal tokens not allowed", refusal before the consent page, "Unknown resource" | Not related to Keycloak: see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). The External user needs the same profiles as a local user would. |
+| "Personal tokens not allowed", "Not available for your account" on the consent page, "Unknown resource" | Not related to Keycloak: see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). The External user needs the same profiles as a local user would. |
 
 ### 5. A Keycloak user logs into LibreChat
 
@@ -653,7 +653,7 @@ closes the tab, and the dot next to **iTop** in the **MCP Servers** panel turns 
 | LibreChat shows an error before any iTop page, and its log says the client registration failed | LibreChat's callback is not in `redirect_uris`: see [iTop: allow LibreChat's callback](#itop-allow-librechats-callback). iTop's error log (channel `altioo-oauth-server`) names the callback LibreChat sent; it must be exactly `https://chat.example.com/api/mcp/itop/oauth/callback`. If it starts with `http://localhost:3080`, `DOMAIN_SERVER` is not set. |
 | iTop says "Unknown resource" | `url` under `mcpServers` → `itop`, `MCP_RESOURCE_URL` and the `itop-mcp` resource in iTop differ. See check 4 of [the prerequisites](itop-prerequisites.md#4-the-resource-url-matches-in-all-three-places). |
 | After the Keycloak login you land on iTop's home page instead of the consent page | See check 4 above. |
-| Refusal before the consent page | The iTop user lacks the profiles; see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
+| The consent page says "Not available for your account" – "Your profiles do not give access to what this application asks for" | The iTop user on the consent page lacks the profiles; see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). Check first *who* that user is: the consent page uses the iTop session the browser already has. If this browser was logged into iTop as someone else (for example `admin`), you land on the consent page as that person, even though another user is logged into LibreChat. Log out of iTop, use a private browser window, or log into iTop as the intended user first, then connect again. |
 | The tab ends on a LibreChat error page after consent | Check LibreChat's log for the token exchange with iTop, and iTop's error log (channel `altioo-oauth-server`). |
 
 ### 7. `whoami` names the logged-in iTop user
