@@ -37,6 +37,7 @@ Before you start:
 7. [Keycloak: client for LibreChat](#keycloak-client-for-librechat)
 8. [LibreChat](#librechat)
 9. [Check list](#check-list)
+10. [Both MCP servers in one LibreChat](#both-mcp-servers-in-one-librechat)
 
 ## Example hostnames
 
@@ -675,3 +676,94 @@ more.
 | The model answers without calling a tool | The model does not support tool calls, or the `itop` server is not switched on in this chat. |
 | `Angemeldet in iTop als: ?` | The token works, but the iTop user has no linked Person (**Contact** of the External user). If the client never connects at all, see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
 | Another person's name | The browser was still logged into iTop as someone else when consent was given in check 6, and iTop issued the token for that user. Disconnect **iTop** in LibreChat, log out of iTop, and connect again. Each user should give consent in their own browser session. |
+
+## Both MCP servers in one LibreChat
+
+To offer iTop and Dolibarr in the same LibreChat, run both MCP servers side by side and add both to
+the same `librechat.yaml`. This section lists only what differs from the single-server setup above.
+The Dolibarr side (Dolibarr's own settings and callback) is in the
+[Dolibarr MCP server's example setup](https://github.com/storkakos/dolibarr-mcp-server/blob/main/docs/setup/example-keycloak-librechat.md).
+
+| Example | What it is |
+|---|---|
+| `https://mcp-itop.example.com/mcp` | iTop MCP server (its `MCP_RESOURCE_URL`) |
+| `https://mcp-erp.example.com/mcp` | Dolibarr MCP server (its `MCP_RESOURCE_URL`) |
+| `https://chat.example.com/api/mcp/itop/oauth/callback` | LibreChat's callback for iTop, in `redirect_uris` of **iTop's** altioo-oauth-server |
+| `https://chat.example.com/api/mcp/dolibarr/oauth/callback` | LibreChat's callback for Dolibarr, on **restoauth's** redirect allowlist |
+
+- **Each server has its own public hostname (or path) and its own resource URL.** Both MCP servers
+  listen on their own port behind the reverse proxy, and each has its own `MCP_RESOURCE_URL`. The two
+  servers must not share a URL.
+- **Each server has its own OAuth callback**, built from its name in `librechat.yaml`
+  (`/api/mcp/<server name>/oauth/callback`), so the names `itop` and `dolibarr` give two different
+  callbacks. Each goes only on the allowlist of its own system: iTop's in `redirect_uris` of
+  altioo-oauth-server, Dolibarr's in restoauth's **Allowed redirect URIs**. Each system's
+  resource setting lists only its own MCP server's URL.
+- **`allowedDomains` lists all four hosts:** both MCP servers and both systems (iTop and Dolibarr).
+  A host that is missing fails as described under
+  [`mcpSettings`](#librechatyaml-the-itop-mcp-server).
+- **One Keycloak client for LibreChat.** Both systems use the same Keycloak realm and the same
+  `librechat` client for the login to LibreChat itself. The OAuth flows of the two MCP servers do
+  not involve that client.
+
+`librechat.yaml`:
+
+```yaml
+mcpServers:
+  itop:
+    type: streamable-http
+    url: https://mcp-itop.example.com/mcp
+    title: iTop
+    description: Tickets, CIs and contacts from iTop, with your own iTop rights
+    requiresOAuth: true
+  dolibarr:
+    type: streamable-http
+    url: https://mcp-erp.example.com/mcp
+    title: Dolibarr
+    description: Third parties, invoices, proposals, orders and products from Dolibarr, with your own Dolibarr rights
+    requiresOAuth: true
+
+mcpSettings:
+  allowedDomains:
+    - "https://mcp-itop.example.com"
+    - "https://mcp-erp.example.com"
+    - "https://itop.example.com"
+    - "https://erp.example.com"
+
+modelSpecs:
+  list:
+    - name: itop-dolibarr-assistant
+      label: iTop + Dolibarr assistant
+      description: Answers questions about iTop and Dolibarr with your own rights in each
+      preset:
+        # An endpoint and model you have already set up in LibreChat.
+        endpoint: <your endpoint>
+        model: <your model>
+      mcpServers:
+        - itop
+        - dolibarr
+```
+
+Keep the single-server specs next to it if you want them: a spec with `mcpServers: [itop]` only
+offers iTop. The options for preselecting a model spec work as described above.
+
+**Check:** each user connects both servers once (each shows its own consent page, in the user's own
+iTop or Dolibarr session), then starts a chat with the **iTop + Dolibarr assistant** and asks for
+both `whoami` tools:
+
+> Use the whoami tool of iTop and the whoami tool of Dolibarr: who am I in each?
+
+**Expected:** two tool calls, one named after each server. iTop's answer contains
+`Angemeldet in iTop als: <name>`, Dolibarr's result contains `"user"` with the Dolibarr user. The
+names differ if the user has different display names in the two systems.
+
+**If not:** a server whose OAuth connection fails shows the symptoms of the single-server
+[check list](#check-list) (check 6) for that server only; the other one keeps working.
+
+Tested in a combined run on the test VM (the run of the Dolibarr MCP server's twin ticket c04, which
+covers both servers): one Keycloak realm, one LibreChat v0.8.9, iTop 3.2.3 with altioo-oauth-server
+and Dolibarr 23.0.4 with restoauth 0.2.2, both MCP servers behind one TLS proxy under the hostnames
+of the table above. LibreChat loaded exactly this configuration, and an MCP client went through the
+OAuth flow (Keycloak login, consent) of both servers and called both `whoami` tools. The chat
+itself, one model calling both tools, was not repeated in that run (no approved LLM key); it was
+verified in an earlier combined run with a model behind LibreChat.
