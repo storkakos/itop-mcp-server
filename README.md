@@ -141,7 +141,12 @@ terminates TLS on the public host name from `MCP_RESOURCE_URL` and forwards to t
   Host and origin are compared in normal form, on the configured and on the incoming side: letter
   case does not matter, the trailing dot of a fully qualified name is ignored
   (`mcp.example.com.` is `mcp.example.com`), and IPv6 literals are compared in compressed form
-  (`[2001:db8:0::5]` is `[2001:db8::5]`). The default port (`443` for `https`, `80` for `http`) may be
+  (`[2001:db8:0::5]` is `[2001:db8::5]`). An IPv4 address must be written as a dotted quad
+  (`192.0.2.10`); other spellings that the URL standard and many resolvers also read as IPv4
+  (`192.0.522`, `0xc0.0.2.10`, `0300.0.2.10`, `3221225994`) are refused rather than normalised: in
+  `MCP_RESOURCE_URL` they stop startup with a message naming the setting, in an incoming `Host`
+  header they get `421` and in an `Origin` header `403`, with a message saying the address is not a
+  dotted quad. The default port (`443` for `https`, `80` for `http`) may be
   present or left out, both in the `Host` header and in `MCP_RESOURCE_URL` (which must still match
   the `itop-mcp` resource in iTop character for character). A non-default port, as
   in `https://mcp.example.com:8443/mcp`, must be in the `Host` header (`mcp.example.com:8443`).
