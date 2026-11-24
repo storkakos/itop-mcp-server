@@ -45,8 +45,8 @@ downloads), then the commands above again.
 | Apache vhost: reverse-proxy settings and the `.well-known` rewrite | `itop/itop.conf` | prerequisites, "Web server rewrites", "PHP behind a reverse proxy" |
 | Copy the extensions, make the config writable, run the setup wizard as an upgrade | `client/setup.py`, `client/wizard.py` (drives the wizard pages like a browser) | prerequisites, steps 2-4 |
 | Edit `config-itop.php` | `client/config_edits.py` | prerequisites, "Configure iTop"; example, "iTop: log in with Keycloak" |
-| Realm `example`, clients `itop` and `librechat`, email lock-down, test users | `client/keycloak_realm.py` (admin REST API, the manual's values) | example, Keycloak sections |
-| LibreChat `.env` and `librechat.yaml` | `librechat/` | example, "LibreChat" |
+| Realm `example`, clients `itop` and `librechat` (with the post-logout redirect URI), email lock-down, test users. An existing client is merged, not replaced: settings the setup does not own stay | `client/keycloak_realm.py` (admin REST API, the manual's values) | example, Keycloak sections |
+| LibreChat `.env` (Keycloak login and logout) and `librechat.yaml` | `librechat/` | example, "LibreChat" |
 | Check lists | `client/checks.py` | both "Check list" sections |
 | nginx in front of the MCP server, also under a path prefix (nginx variant only) | `compose.nginx.yaml`, `nginx/start.sh` | README, "Reverse proxy (TLS)" |
 
@@ -173,6 +173,16 @@ blocks the script, start it with `powershell -ExecutionPolicy Bypass -File .\ope
 
 ## Notes
 
-- LibreChat limits logins per IP (about 7 in 5 minutes). Running `checks.py` several times in a row
-  can end with `auth_rate_limited`; wait five minutes.
+- LibreChat limits logins per IP: it counts every request under `/oauth/` (start and callback, so two
+  per login, and also the "connected" page after an MCP server's OAuth callback, which the checks do
+  not open) against `LOGIN_MAX` 7 per `LOGIN_WINDOW` 5 minutes. `checks.py` logs into LibreChat three
+  times; when a login would hit the limit (for example because `checks.py` ran shortly before), it waits
+  for the window to end instead of failing, which makes that run up to five minutes longer.
+- Checks for the LibreChat logout: the Keycloak setup run again keeps an attribute, a redirect URI and
+  a post-logout redirect URI that another setup put on the `librechat` client; after `bob` logs out of
+  LibreChat, Keycloak ends the session, the browser lands on LibreChat's login page, and **Sign in
+  with Keycloak** shows Keycloak's login form again so that `anna` can log in (check 8 of the example).
 - The stack uses the names `itop-mcp-test-*` for its project, images and volumes.
+  On a shared Docker host give each run its own project name and image tag, e.g.
+  `TEST_TAG=ic07 docker compose -p ic07 up -d --build` (see `docs/agents/test-vm.md`); without
+  `TEST_TAG` the images keep their fixed names.

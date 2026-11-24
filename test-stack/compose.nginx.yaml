@@ -20,7 +20,7 @@ services:
   # The MCP server again, published under a path prefix of mcp.example.com (README, path prefix).
   mcp-prefix:
     build: ..                           # the same image as mcp (cached)
-    image: itop-mcp-server:test-stack
+    image: itop-mcp-server:${TEST_TAG:-test-stack}
     environment:
       ITOP_BASE_URL: https://itop.example.com
       MCP_RESOURCE_URL: https://mcp.example.com/itop-mcp/mcp

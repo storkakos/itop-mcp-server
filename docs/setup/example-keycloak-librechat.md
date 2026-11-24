@@ -354,13 +354,16 @@ it in [LibreChat](#librechat).
 | Login settings | Root URL | `https://chat.example.com` |
 | | Home URL | `https://chat.example.com/` |
 | | Valid redirect URIs | `https://chat.example.com/oauth/openid/callback` (exactly this, no wildcard) |
-| | Valid post logout redirect URIs | empty |
+| | Valid post logout redirect URIs | `https://chat.example.com/login` (LibreChat's login page, see [Log out of Keycloak too](#env-log-out-of-keycloak-too)) |
 | | Web origins | empty (LibreChat calls Keycloak from the server, not from the browser) |
 
 The reasons are the same as for the [`itop` client](#keycloak-client-for-itop): authorization code
 flow only, exact redirect URI. **Require PKCE** off means Keycloak accepts a login with or without
 PKCE. LibreChat sends PKCE (`S256`) when `OPENID_USE_PKCE=true`, and the client secret protects the
-code exchange either way.
+code exchange either way. The **post logout redirect URI**
+is where Keycloak sends the browser after LibreChat's logout. Without it, Keycloak answers the logout
+with "Invalid redirect uri" and keeps the session, so the next **Sign in with Keycloak** logs the same
+person in without a password.
 
 LibreChat users are the same realm users as iTop users, so the rules in
 [Users in Keycloak](#users-in-keycloak) apply to them too. LibreChat also needs the `email` client
@@ -407,6 +410,30 @@ OPENID_USE_PKCE=true
   **Require PKCE** off on the `librechat` client.
 - If only Keycloak users should use LibreChat, also set `ALLOW_REGISTRATION=false`. Keep
   `ALLOW_EMAIL_LOGIN` as it is if you need a local LibreChat admin account.
+
+### `.env`: log out of Keycloak too
+
+By default, LibreChat's **Log out** only ends the LibreChat session. The Keycloak session stays, and
+the next **Sign in with Keycloak** logs the same person in again without asking for a password: on a
+shared computer the next user gets the previous user's account, and nobody can switch to another
+account. Add these keys so that the logout ends the Keycloak session too:
+
+```sh
+# Log out of Keycloak as well, then come back to LibreChat's login page.
+OPENID_USE_END_SESSION_ENDPOINT=true
+OPENID_POST_LOGOUT_REDIRECT_URI=https://chat.example.com/login
+```
+
+- `OPENID_USE_END_SESSION_ENDPOINT=true` makes LibreChat send the browser to Keycloak's logout
+  endpoint (the realm's `end_session_endpoint`) after its own logout.
+- `OPENID_POST_LOGOUT_REDIRECT_URI` is where Keycloak sends the browser afterwards. It must be listed
+  exactly under **Valid post logout redirect URIs** of the
+  [`librechat` client](#keycloak-client-for-librechat). Without the key, LibreChat sends
+  `DOMAIN_CLIENT` + `/login`, the same URL; the key makes it explicit.
+- When LibreChat still has the user's ID token, Keycloak logs out at once. Otherwise Keycloak first
+  asks "Do you want to log out?"; after **Logout** the browser lands on LibreChat's login page.
+- The logout ends the user's Keycloak session for every application, iTop included. iTop's own
+  session and the connection of LibreChat to the MCP server stay.
 
 LibreChat sits behind your reverse proxy. The proxy must pass `X-Forwarded-Proto: https` to
 LibreChat. Otherwise LibreChat does not set its session cookie during the Keycloak login, and the
@@ -675,3 +702,20 @@ more.
 | The model answers without calling a tool | The model does not support tool calls, or the `itop` server is not switched on in this chat. |
 | `Angemeldet in iTop als: ?` | The token works, but the iTop user has no linked Person (**Contact** of the External user). If the client never connects at all, see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
 | Another person's name | The browser was still logged into iTop as someone else when consent was given in check 6, and iTop issued the token for that user. Disconnect **iTop** in LibreChat, log out of iTop, and connect again. Each user should give consent in their own browser session. |
+
+### 8. After a logout, Keycloak asks for a password again
+
+In LibreChat, click your name at the bottom left, then **Log out**. Then click **Sign in with
+Keycloak**.
+
+**Expected:** after the logout the browser lands on LibreChat's login page (possibly after Keycloak's
+"Do you want to log out?" with **Logout**). **Sign in with Keycloak** shows Keycloak's login form
+again, and a second user can log in with their own username and password.
+
+**If not:**
+
+| Result | Fix |
+|---|---|
+| Keycloak: "Invalid redirect uri" after **Log out** | `OPENID_POST_LOGOUT_REDIRECT_URI` is not listed exactly under **Valid post logout redirect URIs** of the `librechat` client. |
+| **Sign in with Keycloak** logs the previous user in without a form | `OPENID_USE_END_SESSION_ENDPOINT` is not `true` (restart LibreChat after changing `.env`), so LibreChat never sent the browser to Keycloak's logout. |
+| LibreChat refuses the login as rate limited (`auth_rate_limited`) | LibreChat allows about 7 logins per 5 minutes per IP. Wait five minutes. |
