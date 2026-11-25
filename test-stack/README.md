@@ -72,6 +72,23 @@ check of the group `librechat`, the checks wait until LibreChat answers (`/healt
 offers the Keycloak login), up to `LIBRECHAT_READY_TIMEOUT` seconds (default 300). If it does not,
 every check of the group fails with "not run: LibreChat at … not ready within … s".
 
+### Group settings
+
+Some check groups take values from the stack they run on as **group settings** (see combined-test-stack
+GLOSSARY). The defaults are the repo stack's values, so the repo stack behaves as before. The combined
+stack can set them instead of patching the groups at run time.
+
+| Setting | Group | Default | Description |
+|---|---|---|---|
+| `TEST_MCP_URL` | `librechat` | `https://mcp.example.com/mcp` | The MCP server's address expected in the LibreChat config |
+| `TEST_DEFAULT_SPEC` | `librechat` | `itop-assistant` | The name of the preselected assistant spec |
+
+Set them as environment variables when running the checks:
+
+```sh
+docker compose run --rm -e TEST_MCP_URL=http://mcp-server:8080/mcp client python checks.py librechat
+```
+
 ### Add a check
 
 Add it to the group's file, under the other checks of that group:

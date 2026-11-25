@@ -10,6 +10,11 @@ import flows
 from checklib import Group, Skip
 from common import CHAT, KC_USERS, REALM, SSO
 
+# Group settings (see combined-test-stack GLOSSARY): values the group takes from the stack it runs on.
+# Defaults are the repo stack's values, so the repo stack behaves as before.
+TEST_MCP_URL = os.environ.get("TEST_MCP_URL", "https://mcp.example.com/mcp")
+TEST_DEFAULT_SPEC = os.environ.get("TEST_DEFAULT_SPEC", "itop-assistant")
+
 # Seconds to wait for LibreChat before the first check of this group (it boots after the setup).
 READY_TIMEOUT = int(os.environ.get("LIBRECHAT_READY_TIMEOUT", "300"))
 
@@ -94,16 +99,16 @@ def _():
 @check("example option: iTop assistant preselected for new chats")
 def _():
     specs = _chat(anna).config()["modelSpecs"]
-    spec = next(x for x in specs["list"] if x["name"] == "itop-assistant")
+    spec = next(x for x in specs["list"] if x["name"] == TEST_DEFAULT_SPEC)
     assert specs.get("prioritize") is True and spec.get("default") is True and spec.get("mcpServers") == ["itop"], specs
-    return "default spec itop-assistant with the itop server"
+    return f"default spec {TEST_DEFAULT_SPEC} with the itop server"
 
 
 def _whoami_chat(user):
     if not flows.llm_key_present():
         return "SKIP no shared LLM key (LITELLM_KEY in /root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
     lc = _chat(user)
-    spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == "itop-assistant")
+    spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == TEST_DEFAULT_SPEC)
     calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
     retried = ""
     if not calls and not text.strip():  # the model sometimes answers nothing: ask once more
