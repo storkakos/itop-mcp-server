@@ -96,6 +96,8 @@ services:
       - itop-www:/var/www/itop
       - downloads:/downloads:ro
       - ./certs/ca.crt:/ca.crt:ro
+      - ../README.md:/docs/README.md:ro      # group consent compares the docs' wording with iTop
+      - ../docs:/docs/docs:ro
     environment:
       REQUESTS_CA_BUNDLE: /ca.crt
     <<: *net
@@ -157,6 +159,8 @@ services:
     volumes:
       - itop-www:/var/www/itop:ro      # check 4 reads config-itop.php
       - ./certs/ca.crt:/ca.crt:ro
+      - ../README.md:/docs/README.md:ro      # group consent compares the docs' wording with iTop
+      - ../docs:/docs/docs:ro
     environment:
       REQUESTS_CA_BUNDLE: /ca.crt
     env_file:

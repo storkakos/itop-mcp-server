@@ -45,6 +45,7 @@ group name. Groups run in a fixed order, whatever order you name them in:
 |---|---|---|---|
 | `prerequisites` | `client/groups/prerequisites.py` | check list of the iTop prerequisites | setup only |
 | `proxy` | `client/groups/proxy.py` | the README's reverse proxy blocks (path prefix: nginx variant only, otherwise SKIP) | setup only |
+| `consent` | `client/groups/consent.py` | the consent page wording for an account without the profile and the iTop menu paths, as the docs quote them (iTop login form, no LibreChat login) | setup only |
 | `example` | `client/groups/example.py` | example setup, Keycloak and iTop: checks 1 to 4, the Keycloak setup run again | setup only |
 | `librechat` | `client/groups/librechat.py` | example setup, LibreChat: checks 5 to 8, the preselected iTop assistant | `librechat` (and Mongo) |
 
