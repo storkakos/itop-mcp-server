@@ -112,7 +112,8 @@ services:
     env_file:
       - ./librechat/librechat.env
       # Your own LLM key, never committed (see README). Without it, check 7 is skipped.
-      - path: ./llm.env
+      # LLM_ENV_FILE points elsewhere, e.g. at the test VM's shared key (scripts/stack-on-vm.sh).
+      - path: ${LLM_ENV_FILE:-./llm.env}
         required: false
     environment:
       HOST: 0.0.0.0
@@ -136,7 +137,7 @@ services:
     environment:
       REQUESTS_CA_BUNDLE: /ca.crt
     env_file:
-      - path: ./llm.env
+      - path: ${LLM_ENV_FILE:-./llm.env}
         required: false
     <<: *net
 

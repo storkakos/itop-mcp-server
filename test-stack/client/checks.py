@@ -223,7 +223,7 @@ def _():
 
 def _whoami_chat(user):
     if not flows.llm_key_present():
-        return "SKIP no LLM key (llm.env), see README"
+        return "SKIP no shared LLM key (/root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
     lc = chats[user[0]]
     spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == "itop-assistant")
     calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
