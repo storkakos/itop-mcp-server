@@ -5,6 +5,11 @@
 #   docker compose up -d --build      # downloads iTop, installs and configures everything
 #   docker compose logs -f setup      # wait for "setup complete"
 #   docker compose run --rm client python checks.py
+#
+# Only check groups without LibreChat (see README.md, "Check groups"): start the setup alone, which
+# starts neither LibreChat nor Mongo, then run those groups:
+#   docker compose up -d --build setup && docker compose wait setup
+#   docker compose run --rm client python checks.py prerequisites
 name: itop-mcp-test
 
 x-net: &net
@@ -95,6 +100,7 @@ services:
       REQUESTS_CA_BUNDLE: /ca.crt
     <<: *net
 
+  # mongo and librechat are needed only by the check group "librechat" (client/groups/librechat.py).
   mongo:
     image: mongo:8.0.38
     command: ["mongod", "--noauth"]
@@ -126,7 +132,7 @@ services:
       - ./certs/ca.crt:/certs/ca.crt:ro
     <<: *net
 
-  # Runs the check lists: docker compose run --rm client python checks.py
+  # Runs the check lists: docker compose run --rm client python checks.py [GROUP ...]
   client:
     image: itop-mcp-test-client:${TEST_TAG:-local}
     profiles: [checks]

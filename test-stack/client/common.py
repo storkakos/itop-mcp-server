@@ -26,6 +26,8 @@ def metadata_url(resource: str) -> str:
 
 
 MCP_METADATA = metadata_url(MCP)
+# The authorization server the MCP server names: the OAuth extension in iTop.
+ISSUER = f"{ITOP}/env-production/altioo-oauth-server"
 REALM = "example"
 CONFIG = "/var/www/itop/conf/production/config-itop.php"
 

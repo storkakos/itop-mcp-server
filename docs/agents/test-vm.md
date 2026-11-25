@@ -64,10 +64,13 @@ A whole run of `test-stack/` (start, checks, clean-up) from Git Bash in your che
 ```sh
 RUN=it-ti02 bash scripts/stack-on-vm.sh                # Caddy stack, all checks
 RUN=it-ti02 bash scripts/stack-on-vm.sh --nginx        # nginx variant (adds compose.nginx.yaml)
+RUN=it-ti02 bash scripts/stack-on-vm.sh --groups prerequisites,example   # only these check groups
 RUN=it-ti02 bash scripts/stack-on-vm.sh -- -v          # arguments after -- go to checks.py
 ```
 
-It copies the working tree to `/root/itop-mcp-server-$RUN`, takes a VM slot (see [Sharing the VM](#sharing-the-vm)), makes the test certificates, starts the stack as compose project `$RUN` with `TEST_TAG=$RUN` (images `itop-mcp-test-itop:$RUN`, `itop-mcp-server:$RUN`, `itop-mcp-test-client:$RUN`), waits until the setup is complete, runs the checks with their output straight through, and exits with their exit code. Afterwards it always takes the stack down with its volumes and removes its images, its folder and its slot, also on failure or Ctrl-C. The build and start output goes to a log on the VM; when the start fails, the script prints its last lines and the setup's log.
+It copies the working tree to `/root/itop-mcp-server-$RUN`, takes a VM slot (see [Sharing the VM](#sharing-the-vm)), makes the test certificates, starts the stack as compose project `$RUN` with `TEST_TAG=$RUN` (images `itop-mcp-test-itop:$RUN`, `itop-mcp-server:$RUN`, `itop-mcp-test-client:$RUN`), starts only the services the chosen check groups need (see below), waits until the setup is complete, prints the started containers with their RAM, runs the checks with their output straight through, and exits with their exit code. Afterwards it always takes the stack down with its volumes and removes its images, its folder and its slot, also on failure or Ctrl-C. The build and start output goes to a log on the VM; when the start fails, the script prints its last lines and the setup's log.
+
+**Check groups** (`--groups`, default `all`): the checks are split into the groups `prerequisites`, `proxy`, `example` (Keycloak and iTop) and `librechat` (see [test-stack/README.md](../../test-stack/README.md#check-groups)). `--groups prerequisites,proxy` runs only those groups and starts only the setup and its dependencies: neither LibreChat nor Mongo. Only a list with `librechat` (or `all`) starts them. Unknown names stop the script before it touches the VM (exit 2). Before the first LibreChat check the checks wait until LibreChat answers (up to 300 s), so they no longer fail right after the setup.
 
 | Exit code | Meaning |
 | --- | --- |
@@ -94,7 +97,7 @@ $SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.e
 # after each change: copy only the changed files, WITHOUT the rm -rf of the full copy (it would remove certs/)
 git diff --name-only HEAD | tar -T - -cf - | $SSH "tar -xf - -C $DIR"      # plus new files: git ls-files -o --exclude-standard
 $SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN restart librechat"
-$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN run --rm client python checks.py"
+$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN run --rm client python checks.py"      # or: ... python checks.py librechat (only that group)
 ```
 
 Which command picks up which change:
@@ -106,7 +109,7 @@ Which command picks up which change:
 | something a service is built from (`Dockerfile`, `src/`, `test-stack/client/`, `itop/`) | `up -d --build <service>` (`mcp`, `itop`), for the checks themselves `build client` |
 | the Keycloak realm, iTop's config or other things `client/setup.py` does once at the start | start from scratch (`stack-on-vm.sh`); the cheap re-run does not redo the setup |
 
-After a restart LibreChat needs a few seconds before it answers: wait for its log line `Server readiness checks passing` (`docker compose -p $RUN logs --tail 5 librechat`) before the checks. A restart of `proxy` or `mcp` is ready in about a second. The checks always run the whole list, about 5 minutes (a wait for LibreChat's login limit is part of that). Proven on the VM under RUN `it-ti04`: the start took 1 minute with cached images, a changed line in `librechat.yaml` plus `restart librechat` took under a second, and the checks passed (18 passed, 0 failed, 3 skipped).
+After a restart LibreChat needs a few seconds before it answers (its log line `Server readiness checks passing`, `docker compose -p $RUN logs --tail 5 librechat`); the checks wait for it themselves, up to 300 s, before the group `librechat`. A restart of `proxy` or `mcp` is ready in about a second. The whole list takes about 5 minutes (a wait for LibreChat's login limit is part of that); name groups to run fewer (`python checks.py prerequisites`). Proven on the VM under RUN `it-ti04`: the start took 1 minute with cached images, a changed line in `librechat.yaml` plus `restart librechat` took under a second, and the checks passed (18 passed, 0 failed, 3 skipped).
 
 ## LLM key
 
