@@ -135,12 +135,15 @@ Test users:
 
 ## LLM key
 
-LibreChat needs a model with tool calls for check 7. The example uses OpenRouter. Put your key into
+LibreChat needs a model with tool calls for check 7. The test stack uses the shared LiteLLM endpoint. Put your key, the endpoint's base URL and the model into
 `test-stack/llm.env`, which is git-ignored and never committed:
 
 ```sh
 umask 077
-echo 'OPENROUTER_KEY=<your key>' > llm.env
+printf 'LITELLM_KEY=<your key>
+LITELLM_BASE_URL=<base URL of the endpoint>
+LITELLM_MODEL=<model>
+' > llm.env
 docker compose up -d librechat        # pick up the key
 ```
 
@@ -148,9 +151,11 @@ To use a key file somewhere else, set `LLM_ENV_FILE` to its path when you start 
 run the checks; compose reads it in place. On the test VM, `scripts/stack-on-vm.sh` does this with
 the shared key `/root/shared/llm.env` (see [test-vm.md](../docs/agents/test-vm.md#llm-key)).
 
-The model is OpenRouter's free route `openrouter/free`. For another provider or model, change the
-endpoint in `librechat/librechat.yaml` and the key name in `llm.env`. Without a key file,
-`checks.py` reports check 7 as SKIP ("no shared LLM key"), and SKIPs do not fail the run.
+The default is the `LiteLLM` endpoint of `librechat/librechat.yaml`: key, base URL and model come from `LITELLM_KEY`,
+`LITELLM_BASE_URL` and `LITELLM_MODEL`; on the test VM the shared key file `/root/shared/llm.env` has them. For
+another provider, change the endpoint in `librechat/librechat.yaml` and the variable names in `llm.env`. A chat
+check that gets an empty answer retries once and says so. Without `LITELLM_KEY`, `checks.py` reports the chat
+checks as SKIP ("no shared LLM key"), and SKIPs do not fail the run.
 
 ## nginx as TLS proxy
 

@@ -118,14 +118,14 @@ The chat checks (example 7: a chat answer through LibreChat) need an LLM key. Th
 | | |
 | --- | --- |
 | File | `/root/shared/llm.env` (folder `/root/shared` 0700, file 0600, root:root, put there by the maintainer) |
-| Variables | `OPENROUTER_KEY`, `LLM_KEY`, `LLM_BASE_URL`, `LLM_MODEL` (`openrouter/free`) |
+| Variables | `LITELLM_KEY`, `LITELLM_BASE_URL`, `LITELLM_MODEL` (the shared LiteLLM endpoint; the endpoint's host name is only in the file, never in a repo, ticket or commit) |
 
 - This file is the only LLM key agents may use. Keys in other stacks' folders, `.env` files or containers are off limits, also when your chat check would otherwise be skipped: never read, copy or reuse them.
 - Never print the key, and never copy it into a repo, the run's folder, a ticket, a log or a commit. To see which variables the file has, print the names only: `$SSH "sed -n 's/=.*//p' /root/shared/llm.env"`.
 - `scripts/stack-on-vm.sh` lets the stack read the file where it is: it sets `LLM_ENV_FILE=/root/shared/llm.env`, and `test-stack/compose.yaml` passes that file to LibreChat and the check client as an `env_file` (optional), so the key is in their environment at runtime only, not in an image or a file of the run.
 - Without the file, every chat check reports `SKIP no shared LLM key`, and the run's exit code ignores SKIPs. To try that, point `VM_LLM_ENV` at a path that does not exist (`VM_LLM_ENV=/root/shared/none.env RUN=it-x bash scripts/stack-on-vm.sh`); never move or rename the real file.
-- After the checks the script looks for the key's values on the VM in the start log, the logs of all the stack's containers, the check output and the config of the run's images, and prints only where it found one (exit 5). By hand, compare on the VM without printing the key, e.g. `grep -qF "$(sed -n 's/^LLM_KEY=//p' /root/shared/llm.env | cut -c10-25)" <file> && echo found`.
-- The chat model is OpenRouter's free route `openrouter/free` (maintainer decision), set in `test-stack/librechat/librechat.yaml`.
+- After the checks the script looks for the key's values on the VM in the start log, the logs of all the stack's containers, the check output and the config of the run's images, and prints only where it found one (exit 5). By hand, compare on the VM without printing the key, e.g. `grep -qF "$(sed -n 's/^LITELLM_KEY=//p' /root/shared/llm.env | cut -c10-25)" <file> && echo found`.
+- LibreChat has one endpoint, `LiteLLM`, in `test-stack/librechat/librechat.yaml`; key, base URL and model are read from the three variables above, nothing is written into the config. A chat check that gets an empty answer asks once more and says so in its output (`chat answer empty, retrying once`).
 
 The sections below are the manual steps, for the smoke test and for debugging.
 

@@ -2,17 +2,17 @@
 # docs/setup/example-keycloak-librechat.md, plus one AI model (not part of the manual).
 version: 1.3.19
 
-# --- Your LLM endpoint (not part of the manual). The example uses OpenRouter with OPENROUTER_KEY
-# from llm.env and its free route openrouter/free (OpenRouter picks a free model that supports
-# the request's tool calls). For another provider or model, change this block, the key name in
-# llm.env and the preset below. Use a model that supports tool calls.
+# --- Your LLM endpoint (not part of the manual). The test stack uses the shared LiteLLM endpoint: key,
+# base URL and model all come from the key file (LITELLM_KEY, LITELLM_BASE_URL, LITELLM_MODEL; on the
+# test VM /root/shared/llm.env, else test-stack/llm.env). For another provider, change this block, the
+# variable names in llm.env and the preset below. Use a model that supports tool calls.
 endpoints:
   custom:
-    - name: OpenRouter
-      apiKey: "${OPENROUTER_KEY}"
-      baseURL: https://openrouter.ai/api/v1
+    - name: LiteLLM
+      apiKey: "${LITELLM_KEY}"
+      baseURL: "${LITELLM_BASE_URL}"
       models:
-        default: ["openrouter/free"]
+        default: ["${LITELLM_MODEL}"]
         fetch: false
       titleConvo: false
 
@@ -43,7 +43,7 @@ modelSpecs:
       description: Answers questions about iTop with your own iTop rights
       preset:
         # Your endpoint and model (see above).
-        endpoint: OpenRouter
-        model: openrouter/free
+        endpoint: LiteLLM
+        model: "${LITELLM_MODEL}"
       mcpServers:
         - itop
