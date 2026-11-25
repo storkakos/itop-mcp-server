@@ -318,17 +318,19 @@ Notes on the values:
 
 ### Which tokens the MCP server accepts
 
-The MCP server accepts every token that iTop's REST/JSON API accepts. It does **not** check which
-resource a token was issued for. altioo-oauth-server records that (each connection stores its
-resource), but it offers it only as a PHP API inside iTop (`TokenAudience`, see its README). The
-tokens are opaque iTop personal tokens, altioo has no introspection endpoint, and the connection
-records are readable by administrators only, so the MCP server cannot ask. (Checked against
-altioo-oauth-server 0.1.0.)
+The MCP server accepts only OAuth tokens issued by altioo-oauth-server for the MCP server's own
+resource. Before every tool call it asks iTop to check the token with the `mcp/token_info` REST
+operation (provided by the `mcp-token-info` extension) and accepts the token only if:
 
-So a token issued through altioo for another entry in `resources`, or a personal token made by hand
-under *My Account* with the `REST/JSON` scope, also works at the MCP server. It gets no more rights
-there than it already has on `rest.php` directly, and the MCP server only reads. To keep the
-assistant to the people meant for it:
+- the check succeeds (`code: 0`),
+- the token is an OAuth token (`token.oauth: true`), and
+- the token's resource URL matches the MCP server's `MCP_RESOURCE_URL`.
+
+Hand-made personal tokens from *My Account* (`token.oauth: false`) are rejected, as are tokens
+issued for other resources. The MCP server therefore needs the `mcp-token-info` extension installed
+and enabled on the iTop side; without it, every token is rejected.
+
+To keep the assistant to the people meant for it:
 
 - keep `resources` to the single `itop-mcp` entry above, and
 - keep `personal_tokens_allowed_profiles` to the profiles that should use the assistant.

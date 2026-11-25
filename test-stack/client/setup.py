@@ -38,6 +38,8 @@ def main() -> None:
     if not (ext / "combodo-hybridauth" / "module.combodo-hybridauth.php").exists():
         zipfile.ZipFile("/downloads/combodo-hybridauth-2.1.1.zip").extractall(ext)
         shutil.move(str(ext / "combodo-hybridauth-2.1.1"), str(ext / "combodo-hybridauth"))
+    if not (ext / "mcp-token-info" / "extension.xml").exists():
+        zipfile.ZipFile("/downloads/mcp-token-info-0.1.0.zip").extractall(ext)
     chown_tree(ext)
     for p in ("datamodels/2.x/combodo-oauth2-client/module.combodo-oauth2-client.php",
               "datamodels/2.x/itop-attribute-encrypted-password/module.itop-attribute-encrypted-password.php"):
@@ -46,7 +48,7 @@ def main() -> None:
     if not (W / "env-production" / "altioo-oauth-server").exists():
         say("prerequisites, steps 3-4: config writable, setup wizard as upgrade")
         os.chmod(CONFIG, 0o640)
-        wizard.run_upgrade(["altioo-oauth-server", "combodo-hybridauth"])
+        wizard.run_upgrade(["altioo-oauth-server", "combodo-hybridauth", "mcp-token-info"])
 
     say("prerequisites, step 5 + Configure iTop; example: iTop log in with Keycloak")
     os.chmod(CONFIG, 0o640)

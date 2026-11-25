@@ -74,6 +74,10 @@ class FakeITop:
     ticket_class: str = "UserRequest"
     # False: core/get on ticket classes finds nothing
     ticket_found: bool = True
+    # token_info behaviour: None = not installed (code 11), dict = returned as token field
+    token_info: dict | None = None
+    # when True, mcp/token_info is not a known operation (extension not installed)
+    token_info_unknown: bool = False
 
     def reset(self) -> None:
         self.valid_tokens.clear()
@@ -87,6 +91,8 @@ class FakeITop:
         self.errors_until_request = None
         self.ticket_class = "UserRequest"
         self.ticket_found = True
+        self.token_info = None
+        self.token_info_unknown = False
 
     def core_gets(self) -> list[ReceivedRequest]:
         return [r for r in self.requests if r.name == "core/get"]
@@ -111,6 +117,19 @@ class FakeITop:
                 code, message = self.list_operations_error
                 return JSONResponse({"code": code, "message": message})
             return JSONResponse({"code": 0, "message": "Operations: 1", "version": "1.3", "operations": []})
+        if op.get("operation") == "mcp/token_info":
+            if self.token_info_unknown:
+                return JSONResponse({"code": 11, "message": "Unknown verb 'mcp/token_info'"})
+            if self.token_info is not None:
+                return JSONResponse({
+                    "code": 0,
+                    "message": "mcp/token_info",
+                    "extension_version": "0.1.0",
+                    "oauth_server": True,
+                    "user": {"id": 1, "login": "testuser"},
+                    "token": self.token_info,
+                })
+            return JSONResponse({"code": 11, "message": "Unknown verb 'mcp/token_info'"})
         if op.get("operation") == "core/get":
             cls = op.get("class") or "Ticket"
             if errors_on and self.core_get_error and cls != "Person":

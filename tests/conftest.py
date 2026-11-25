@@ -52,9 +52,18 @@ def mcp_server(fake_itop, tmp_path_factory) -> str:
 
 @pytest.fixture
 def itop(fake_itop) -> FakeITop:
-    """The fake iTop, reset for each test, accepting VALID_TOKEN."""
+    """The fake iTop, reset for each test, accepting VALID_TOKEN as an OAuth token for RESOURCE_URL."""
     fake_itop.reset()
     fake_itop.valid_tokens.add(VALID_TOKEN)
+    # Default: VALID_TOKEN is a valid OAuth token for RESOURCE_URL
+    fake_itop.token_info = {
+        "class": "PersonalToken",
+        "id": 1,
+        "oauth": True,
+        "resource": {"key": "mcp", "url": RESOURCE_URL},
+        "scopes": ["REST/JSON"],
+        "expires_at": None,
+    }
     return fake_itop
 
 
