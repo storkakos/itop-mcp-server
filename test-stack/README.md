@@ -140,10 +140,7 @@ LibreChat needs a model with tool calls for check 7. The test stack uses the sha
 
 ```sh
 umask 077
-printf 'LITELLM_KEY=<your key>
-LITELLM_BASE_URL=<base URL of the endpoint>
-LITELLM_MODEL=<model>
-' > llm.env
+printf '%s\n' 'LITELLM_KEY=<your key>' 'LITELLM_BASE_URL=<base URL of the endpoint>' 'LITELLM_MODEL=<model>' > llm.env
 docker compose up -d librechat        # pick up the key
 ```
 
