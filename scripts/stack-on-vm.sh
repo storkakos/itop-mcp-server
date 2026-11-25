@@ -11,9 +11,16 @@
 # take the stack down with its volumes and remove its images, folder and slot, also on failure or
 # Ctrl-C. Exits with the checks' exit code.
 #
+# LLM key: the stack reads the VM's one shared key file VM_LLM_ENV in place (compose env_file through
+# LLM_ENV_FILE, at runtime only); it is never copied into the repo or the run's folder. Without the
+# file the chat checks report SKIP "no shared LLM key". After the checks the script looks for the
+# key's values in the start log, the stack's logs, the check output and its images' config, on the
+# VM, and prints only where it found one (exit 5).
+#
 # Exit codes: the checks' own code once they ran; 2 wrong usage or RUN already in use on the VM
 # (by any repo: RUN is the bare compose project name, so prefix it, e.g. it-ti02); 3 the stack
 # did not start (the tail of the start log is printed); 4 no VM slot within VM_SLOT_TIMEOUT;
+# 5 the checks passed but an LLM key showed up in a log, the check output or an image;
 # 255 SSH failed (VM not reachable, key refused, connection lost).
 #
 # Environment:
@@ -26,6 +33,8 @@
 #   VM_SLOT_MIN_MB  available RAM needed to start (default 3072)
 #   VM_SLOT_TIMEOUT seconds to wait for a slot before giving up (default 1800)
 #   START_TIMEOUT   seconds for build + start until the setup is complete (default 1500)
+#   VM_LLM_ENV      the shared LLM key file on the VM (default /root/shared/llm.env; point it at a
+#                   path that does not exist to test the run without a key)
 set -euo pipefail
 
 # --- What differs between repos (the Dolibarr twin changes only this block) ----------------------
@@ -63,13 +72,20 @@ SLOT_MAX="${VM_SLOT_MAX:-3}"
 SLOT_MIN_MB="${VM_SLOT_MIN_MB:-3072}"
 SLOT_TIMEOUT="${VM_SLOT_TIMEOUT:-1800}"
 START_TIMEOUT="${START_TIMEOUT:-1500}"
+LLM_ENV="${VM_LLM_ENV:-/root/shared/llm.env}"  # the VM's one shared LLM key, root-only (see test-vm.md)
+if ! [[ "$LLM_ENV" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+  echo "$ME: VM_LLM_ENV must be an absolute path of letters, digits, . _ / - (got '$LLM_ENV')" >&2
+  exit 2
+fi
 
 SSH=(ssh -i "${VM_KEY:-$HOME/.ssh/itop-mcp-test-vm}"
   -o "UserKnownHostsFile=${VM_KNOWN_HOSTS:-$HOME/.ssh/itop-mcp-test-vm.known_hosts}"
   -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$VM_HOST")
 
 # Compose as this run sees it, on the VM: own project name and image tags. Use as "$IN_STACK && $DC ...".
-IN_STACK="cd $DIR/$STACK_DIR && export TEST_TAG=$RUN"
+# LLM_ENV_FILE: compose reads the shared key file where it is (env_file, required: false), so the
+# key is never copied and a missing file only makes the chat checks SKIP.
+IN_STACK="cd $DIR/$STACK_DIR && export TEST_TAG=$RUN LLM_ENV_FILE=$LLM_ENV"
 DC="docker compose -p $RUN ${COMPOSE_FILES[*]}"
 
 # vm CMD: run CMD on the VM and return its exit code. ssh exits 255 when it cannot connect, log in
@@ -172,6 +188,11 @@ done
 
 # 3. Start the stack. up returns once the one-shot setup has completed (LibreChat depends on it).
 # The build and start output goes to a log on the VM and is shown only when the start fails.
+if vm "[ -f $LLM_ENV ]"; then
+  echo "$ME: LLM key: the stack reads the shared key file $LLM_ENV (not copied)"
+else
+  echo "$ME: LLM key: no shared LLM key at $LLM_ENV, the chat checks will report SKIP"
+fi
 echo "$ME: starting the stack (build, iTop install, setup: about 5-10 minutes)"
 rc=0
 vm "$IN_STACK && $PREPARE && $DC config --quiet &&
@@ -184,10 +205,49 @@ if [ "$rc" -ne 0 ]; then
 fi
 echo "$ME: stack is up"
 
-# 4. The checks: output straight through, exit code unchanged (no pipe after them).
+# 4. The checks: output straight through, exit code unchanged. A copy goes to a local file for the
+# key scan below (PIPESTATUS keeps the checks' code; vm's own exit 255 ends only the subshell).
 args=""
 [ "$#" -gt 0 ] && args=" $(printf '%q ' "$@")"
-status=0
-vm "$IN_STACK && $DC ${CHECKS[*]}$args" || status=$?
+checks_out="$(mktemp)"
+# set +e around the pipe: with errexit and pipefail a failing check would end the script here,
+# before the key scan; PIPESTATUS is read right after the pipe, before set -e changes it.
+set +e
+vm "$IN_STACK && $DC ${CHECKS[*]}$args" | tee "$checks_out"
+status=${PIPESTATUS[0]}
+set -e
 echo "$ME: checks exit code $status"
+[ "$status" -eq 255 ] && { rm -f "$checks_out"; exit 255; }
+
+# 5. Key scan, on the VM only: every *_KEY value of the shared file (and a 16-character piece of it,
+# past the provider prefix) is looked up in the start log, all logs of the stack, the check output
+# (sent back from here) and the config of the images tagged :$RUN. Only places are printed, never
+# a value. Without the file there is nothing to look for.
+rc=0
+leaks="$(vm "[ -f $LLM_ENV ] || { echo NOKEY; exit 0; }
+  cat > $DIR/checks.out
+  ($IN_STACK && $DC logs --no-color) > $DIR/compose.log 2>&1
+  imgs=\$($IN_STACK && $DC config --images 2>/dev/null | grep ':$RUN\$')
+  [ -z \"\$imgs\" ] || docker image inspect \$imgs > $DIR/images.json 2>/dev/null
+  sed -n 's/^[A-Za-z0-9_]*_KEY=//p' $LLM_ENV | tr -d '\\r\"' | while IFS= read -r k; do
+    [ \${#k} -ge 8 ] || continue
+    p=\$(printf %s \"\$k\" | cut -c10-25); [ \${#p} -ge 8 ] || p=\$k
+    for f in start.log compose.log checks.out images.json; do
+      [ -f $DIR/\$f ] && grep -qF -e \"\$k\" -e \"\$p\" $DIR/\$f && echo \$f
+    done
+  done | sort -u | tr '\\n' ' '
+  rm -f $DIR/checks.out $DIR/compose.log $DIR/images.json" < "$checks_out")" || rc=$?
+rm -f "$checks_out"
+[ "$rc" -eq 255 ] && exit 255
+if [ "$rc" -ne 0 ]; then
+  echo "$ME: the key scan on the VM failed (exit $rc)" >&2
+  [ "$status" -eq 0 ] && status=5
+elif [ "$leaks" = NOKEY ]; then
+  echo "$ME: key scan: no shared LLM key, nothing to look for"
+elif [ -n "${leaks// /}" ]; then
+  echo "$ME: key scan: an LLM key shows up in: $leaks(on the VM, removed with the run's folder)" >&2
+  [ "$status" -eq 0 ] && status=5
+else
+  echo "$ME: key scan: no LLM key in the start log, the stack's logs, the check output or the images"
+fi
 exit "$status"

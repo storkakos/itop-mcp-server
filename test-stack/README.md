@@ -78,8 +78,13 @@ echo 'OPENROUTER_KEY=<your key>' > llm.env
 docker compose up -d librechat        # pick up the key
 ```
 
-For another provider, change the endpoint in `librechat/librechat.yaml` and the key name in
-`llm.env`. Without `llm.env`, `checks.py` skips check 7 and says so.
+To use a key file somewhere else, set `LLM_ENV_FILE` to its path when you start the stack and
+run the checks; compose reads it in place. On the test VM, `scripts/stack-on-vm.sh` does this with
+the shared key `/root/shared/llm.env` (see [test-vm.md](../docs/agents/test-vm.md#llm-key)).
+
+The model is OpenRouter's free route `openrouter/free`. For another provider or model, change the
+endpoint in `librechat/librechat.yaml` and the key name in `llm.env`. Without a key file,
+`checks.py` reports check 7 as SKIP ("no shared LLM key"), and SKIPs do not fail the run.
 
 ## nginx as TLS proxy
 

@@ -271,5 +271,5 @@ class LibreChat:
 
 
 def llm_key_present() -> bool:
-    """An LLM key from llm.env (any *_KEY). GPG_KEY is set by the Python base image, not by llm.env."""
+    """An LLM key from the LLM env file (llm.env or LLM_ENV_FILE; any *_KEY). GPG_KEY is set by the Python base image, not by llm.env."""
     return any(v for k, v in os.environ.items() if k.endswith("_KEY") and k != "GPG_KEY")

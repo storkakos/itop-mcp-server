@@ -45,9 +45,10 @@ It copies the working tree to `/root/itop-mcp-server-$RUN`, takes a VM slot (see
 | 2 | wrong usage, or this RUN is already in use on the VM (folder, slot or compose project) |
 | 3 | the stack did not start (or not within `START_TIMEOUT`, default 1500 s) |
 | 4 | no VM slot within `VM_SLOT_TIMEOUT` (default 1800 s) |
+| 5 | the checks passed, but an LLM key showed up in a log, the check output or an image (see [LLM key](#llm-key)) |
 | 255 | SSH failed: VM not reachable, key refused or connection lost |
 
-RUN names must be unique on the whole VM, across repos: the compose project name is the bare `$RUN`, so an iTop and a Dolibarr run with the same name would share one project. Prefix the name with the repo, e.g. `it-ti02` here and `dl-ti02` in Dolibarr. The script refuses to start (exit 2) when the folder exists, when any slot already has that RUN, or when the VM has a container, volume or network of compose project `$RUN`. `RUN` must not be `local`, `latest`, `test-stack`, `itop-mcp-test` or `itop-mcp-smoke`, the stack's shared default tags and project names. The stack publishes no ports, so runs need no port of their own. `VM_HOST`, `VM_KEY` and `VM_KNOWN_HOSTS` work as for `test-on-vm.sh`; `VM_SLOT_MAX` (3) and `VM_SLOT_MIN_MB` (3072) change the slot rule. Without `test-stack/llm.env` on the VM the chat check is skipped, and the script never copies a key there.
+RUN names must be unique on the whole VM, across repos: the compose project name is the bare `$RUN`, so an iTop and a Dolibarr run with the same name would share one project. Prefix the name with the repo, e.g. `it-ti02` here and `dl-ti02` in Dolibarr. The script refuses to start (exit 2) when the folder exists, when any slot already has that RUN, or when the VM has a container, volume or network of compose project `$RUN`. `RUN` must not be `local`, `latest`, `test-stack`, `itop-mcp-test` or `itop-mcp-smoke`, the stack's shared default tags and project names. The stack publishes no ports, so runs need no port of their own. `VM_HOST`, `VM_KEY` and `VM_KNOWN_HOSTS` work as for `test-on-vm.sh`; `VM_SLOT_MAX` (3) and `VM_SLOT_MIN_MB` (3072) change the slot rule. For the LLM key see [LLM key](#llm-key): the script points the stack at the shared key file and never copies it; without that file the chat checks report SKIP.
 
 If the script was killed so hard that its clean-up could not run (or SSH was gone), clean up by hand as described in [Clean up](#clean-up) and remove the slot: `rm -f /var/lib/test-vm-slots/itop-mcp-server-$RUN.lease`.
 
@@ -58,12 +59,12 @@ If the script was killed so hard that its clean-up could not run (or SSH was gon
 ```sh
 RUN=it-ti04; DIR=/root/itop-mcp-server-$RUN
 # once: copy (see "Copy the working tree over"), take a slot (lease file, see "Sharing the VM"), then
-$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN && sh make-certs.sh >/dev/null &&
+$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && sh make-certs.sh >/dev/null &&
       docker compose -p $RUN up -d --build --quiet-pull"       # returns when the setup is complete
 # after each change: copy only the changed files, WITHOUT the rm -rf of the full copy (it would remove certs/)
 git diff --name-only HEAD | tar -T - -cf - | $SSH "tar -xf - -C $DIR"      # plus new files: git ls-files -o --exclude-standard
-$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN && docker compose -p $RUN restart librechat"
-$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN && docker compose -p $RUN run --rm client python checks.py"
+$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN restart librechat"
+$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN run --rm client python checks.py"
 ```
 
 Which command picks up which change:
@@ -76,6 +77,22 @@ Which command picks up which change:
 | the Keycloak realm, iTop's config or other things `client/setup.py` does once at the start | start from scratch (`stack-on-vm.sh`); the cheap re-run does not redo the setup |
 
 After a restart LibreChat needs a few seconds before it answers: wait for its log line `Server readiness checks passing` (`docker compose -p $RUN logs --tail 5 librechat`) before the checks. A restart of `proxy` or `mcp` is ready in about a second. The checks always run the whole list, about 5 minutes (a wait for LibreChat's login limit is part of that). Proven on the VM under RUN `it-ti04`: the start took 1 minute with cached images, a changed line in `librechat.yaml` plus `restart librechat` took under a second, and the checks passed (18 passed, 0 failed, 3 skipped).
+
+## LLM key
+
+The chat checks (example 7: a chat answer through LibreChat) need an LLM key. The VM has exactly one, for every repo and every agent:
+
+| | |
+| --- | --- |
+| File | `/root/shared/llm.env` (folder `/root/shared` 0700, file 0600, root:root, put there by the maintainer) |
+| Variables | `OPENROUTER_KEY`, `LLM_KEY`, `LLM_BASE_URL`, `LLM_MODEL` (`openrouter/free`) |
+
+- This file is the only LLM key agents may use. Keys in other stacks' folders, `.env` files or containers are off limits, also when your chat check would otherwise be skipped: never read, copy or reuse them.
+- Never print the key, and never copy it into a repo, the run's folder, a ticket, a log or a commit. To see which variables the file has, print the names only: `$SSH "sed -n 's/=.*//p' /root/shared/llm.env"`.
+- `scripts/stack-on-vm.sh` lets the stack read the file where it is: it sets `LLM_ENV_FILE=/root/shared/llm.env`, and `test-stack/compose.yaml` passes that file to LibreChat and the check client as an `env_file` (optional), so the key is in their environment at runtime only, not in an image or a file of the run.
+- Without the file, every chat check reports `SKIP no shared LLM key`, and the run's exit code ignores SKIPs. To try that, point `VM_LLM_ENV` at a path that does not exist (`VM_LLM_ENV=/root/shared/none.env RUN=it-x bash scripts/stack-on-vm.sh`); never move or rename the real file.
+- After the checks the script looks for the key's values on the VM in the start log, the logs of all the stack's containers, the check output and the config of the run's images, and prints only where it found one (exit 5). By hand, compare on the VM without printing the key, e.g. `grep -qF "$(sed -n 's/^LLM_KEY=//p' /root/shared/llm.env | cut -c10-25)" <file> && echo found`.
+- The chat model is OpenRouter's free route `openrouter/free` (maintainer decision), set in `test-stack/librechat/librechat.yaml`.
 
 The sections below are the manual steps, for the smoke test and for debugging.
 
