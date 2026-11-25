@@ -1,5 +1,9 @@
-# TEST ONLY. LibreChat v0.8.9 config of the test stack: the snippets of
+# TEST ONLY. TEMPLATE of the LibreChat v0.8.9 config of the test stack: the snippets of
 # docs/setup/example-keycloak-librechat.md, plus one AI model (not part of the manual).
+# At container start (compose.yaml, service librechat) the placeholder for the model name (LITELLM_MODEL between double underscores) is replaced by
+# LITELLM_MODEL and the result is written to /tmp/librechat.yaml (CONFIG_PATH). LibreChat itself only
+# substitutes ${VAR} in apiKey and baseURL, not in model names, so the model name is rendered here, per
+# stack. Twin: dolibarr-mcp-server test-infra 10 has its own small render step; no shared script.
 version: 1.3.19
 
 # --- Your LLM endpoint (not part of the manual). The test stack uses the shared LiteLLM endpoint: key,
@@ -12,7 +16,7 @@ endpoints:
       apiKey: "${LITELLM_KEY}"
       baseURL: "${LITELLM_BASE_URL}"
       models:
-        default: ["${LITELLM_MODEL}"]
+        default: ["__LITELLM_MODEL__"]
         fetch: false
       titleConvo: false
 
@@ -44,6 +48,6 @@ modelSpecs:
       preset:
         # Your endpoint and model (see above).
         endpoint: LiteLLM
-        model: "${LITELLM_MODEL}"
+        model: "__LITELLM_MODEL__"
       mcpServers:
         - itop

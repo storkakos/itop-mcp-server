@@ -112,7 +112,7 @@ table above.
 | Copy the extensions, make the config writable, run the setup wizard as an upgrade | `client/setup.py`, `client/wizard.py` (drives the wizard pages like a browser) | prerequisites, steps 2-4 |
 | Edit `config-itop.php` | `client/config_edits.py` | prerequisites, "Configure iTop"; example, "iTop: log in with Keycloak" |
 | Realm `example`, clients `itop` (with front-channel logout to iTop's logoff page) and `librechat` (with the post-logout redirect URI), email lock-down, test users. An existing client is merged, not replaced: settings the setup does not own stay | `client/keycloak_realm.py` (admin REST API, the manual's values) | example, Keycloak sections |
-| LibreChat `.env` (Keycloak login and logout) and `librechat.yaml` | `librechat/` | example, "LibreChat" |
+| LibreChat `.env` (Keycloak login and logout) and `librechat.yaml` | `librechat/` (`librechat.yaml.tmpl`) | example, "LibreChat" |
 | Check lists, one file per check group (see [Check groups](#check-groups)) | `client/groups/*.py`, run by `client/checks.py` | both "Check list" sections |
 | User switch in one browser: A connects iTop and logs out, B logs in and connects; B must consent and get a token as B. Runs as the last check of the group `librechat`; `python user_switch.py` prints each step | `client/user_switch.py` | example, check 8 |
 | nginx in front of the MCP server, also under a path prefix (nginx variant only) | `compose.nginx.yaml`, `nginx/start.sh` | README, "Reverse proxy (TLS)" |
@@ -151,9 +151,10 @@ To use a key file somewhere else, set `LLM_ENV_FILE` to its path when you start 
 run the checks; compose reads it in place. On the test VM, `scripts/stack-on-vm.sh` does this with
 the shared key `/root/shared/llm.env` (see [test-vm.md](../docs/agents/test-vm.md#llm-key)).
 
-The default is the `LiteLLM` endpoint of `librechat/librechat.yaml`: key, base URL and model come from `LITELLM_KEY`,
-`LITELLM_BASE_URL` and `LITELLM_MODEL`; on the test VM the shared key file `/root/shared/llm.env` has them. For
-another provider, change the endpoint in `librechat/librechat.yaml` and the variable names in `llm.env`. A chat
+The default is the `LiteLLM` endpoint of `librechat/librechat.yaml.tmpl`: key, base URL and model come from `LITELLM_KEY`,
+`LITELLM_BASE_URL` and `LITELLM_MODEL` (LibreChat reads the first two itself; it does not substitute variables in model names, so the
+`librechat` container renders the model name into `/tmp/librechat.yaml` at start); on the test VM the shared key file `/root/shared/llm.env` has them. For
+another provider, change the endpoint in `librechat/librechat.yaml.tmpl` and the variable names in `llm.env`. A chat
 check that gets an empty answer retries once and says so. Without `LITELLM_KEY`, `checks.py` reports the chat
 checks as SKIP ("no shared LLM key"), and SKIPs do not fail the run.
 

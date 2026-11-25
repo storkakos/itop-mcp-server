@@ -104,7 +104,7 @@ Which command picks up which change:
 
 | Changed | Command (as `docker compose -p $RUN ...`) |
 | --- | --- |
-| a file mounted into a service (`librechat/librechat.yaml`, `Caddyfile`, `nginx/*`): the content, not the compose file | `restart <service>` (`librechat`, `proxy`) |
+| a file mounted into a service (`librechat/librechat.yaml.tmpl`, `Caddyfile`, `nginx/*`): the content, not the compose file | `restart <service>` (`librechat`, `proxy`) |
 | `librechat/librechat.env`, a service's `environment:` or other compose settings | `up -d <service>` (recreates only that service) |
 | something a service is built from (`Dockerfile`, `src/`, `test-stack/client/`, `itop/`) | `up -d --build <service>` (`mcp`, `itop`), for the checks themselves `build client` |
 | the Keycloak realm, iTop's config or other things `client/setup.py` does once at the start | start from scratch (`stack-on-vm.sh`); the cheap re-run does not redo the setup |
@@ -125,7 +125,7 @@ The chat checks (example 7: a chat answer through LibreChat) need an LLM key. Th
 - `scripts/stack-on-vm.sh` lets the stack read the file where it is: it sets `LLM_ENV_FILE=/root/shared/llm.env`, and `test-stack/compose.yaml` passes that file to LibreChat and the check client as an `env_file` (optional), so the key is in their environment at runtime only, not in an image or a file of the run.
 - Without the file, every chat check reports `SKIP no shared LLM key`, and the run's exit code ignores SKIPs. To try that, point `VM_LLM_ENV` at a path that does not exist (`VM_LLM_ENV=/root/shared/none.env RUN=it-x bash scripts/stack-on-vm.sh`); never move or rename the real file.
 - After the checks the script looks for the key's values on the VM in the start log, the logs of all the stack's containers, the check output and the config of the run's images, and prints only where it found one (exit 5). By hand, compare on the VM without printing the key, e.g. `grep -qF "$(sed -n 's/^LITELLM_KEY=//p' /root/shared/llm.env | cut -c10-25)" <file> && echo found`.
-- LibreChat has one endpoint, `LiteLLM`, in `test-stack/librechat/librechat.yaml`; key, base URL and model are read from the three variables above, nothing is written into the config. A chat check that gets an empty answer asks once more and says so in its output (`chat answer empty, retrying once`).
+- LibreChat has one endpoint, `LiteLLM`, in `test-stack/librechat/librechat.yaml.tmpl`; key and base URL are read by LibreChat from `LITELLM_KEY` and `LITELLM_BASE_URL`, and the model name is rendered from `LITELLM_MODEL` into the config at every start of the `librechat` container (LibreChat does not substitute `${VAR}` in model names), so no model name is in the repo. A chat check that gets an empty answer asks once more and says so in its output (`chat answer empty, retrying once`).
 
 The sections below are the manual steps, for the smoke test and for debugging.
 
