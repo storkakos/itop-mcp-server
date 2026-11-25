@@ -83,28 +83,29 @@ def _admin_menu() -> list:
     soup = BeautifulSoup(r.text, "lxml")
     nav = soup.select_one(".ibo-navigation-menu") or soup
     labels = [re.sub(r"\s+", " ", t).strip() for t in nav.stripped_strings]
-    assert "Admin tools" in labels, f"no 'Admin tools' in the menu: {labels[:40]}"
+    assert "Administration" in labels, f"no 'Administration' in the menu: {labels[:40]}"
     return labels
 
 
 def _documented_paths() -> list:
-    """Menu chains from the docs: '*Admin tools* → *User accounts* → *New* → ...' up to the first action."""
+    """Menu chains from the docs: '*Administration* → *User management* → *User accounts* → *New* → ...' up to the first action."""
     paths = set()
     for rel in MENU_DOCS:
-        for m in re.finditer(r"Admin tools[*]* (?:→ [*]*[^*→|.(),]+[*]* ?)+", _doc(rel).replace("*", "")):
+        for m in re.finditer(r"Administration[*]* (?:→ [*]*[^*→|.(),]+[*]* ?)+", _doc(rel).replace("*", "")):
             parts = [p.strip() for p in m.group(0).split("→")]
-            if "New" in parts:
-                parts = parts[:parts.index("New")]
+            for stop in ("New", "the user"):  # an action or a record, not a menu entry
+                if stop in parts:
+                    parts = parts[:parts.index(stop)]
             paths.add(tuple(parts))
     return sorted(paths)
 
 
-@check("consent: the menu paths the docs name exist for an administrator, including Profiles under User accounts")
+@check("consent: the menu paths the docs name exist for an administrator, including Profiles under User management")
 def _():
     labels = _admin_menu()
     paths = _documented_paths()
-    assert paths, "found no 'Admin tools → ...' path in the docs"
-    paths = sorted(set(paths) | {("Admin tools", "User accounts", "Profiles")})
+    assert paths, "found no 'Administration → ...' path in the docs"
+    paths = sorted(set(paths) | {("Administration", "User management", "Profiles")})
     missing = []
     for path in paths:
         pos = -1
