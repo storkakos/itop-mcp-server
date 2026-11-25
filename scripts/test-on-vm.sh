@@ -43,16 +43,28 @@ cleanup() {
 }
 
 echo "test-on-vm: run $RUN, folder $DIR, image $PYTHON_IMAGE"
-"${SSH[@]}" "test ! -e $DIR" || {
+# ssh exits 255 when it cannot connect or log in; only exit 1 comes from the remote test itself.
+check=0
+"${SSH[@]}" "test ! -e $DIR" || check=$?
+if [ "$check" -eq 255 ]; then
+  echo "test-on-vm: cannot reach the VM over SSH (${VM_HOST:-root@192.168.178.25}), see the ssh error above" >&2
+  exit 255
+elif [ "$check" -ne 0 ]; then
   echo "test-on-vm: $DIR already exists on the VM (another run with RUN=$RUN?), pick another RUN" >&2
   exit 2
-}
+fi
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
 git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - \
   | "${SSH[@]}" "mkdir $DIR && tar -xf - -C $DIR"
+
+# Our own -q only when the caller passes none: pytest counts -q, and -qq drops the summary line.
+quiet=-q
+for arg in "$@"; do
+  if [ "$arg" = -q ] || [ "$arg" = --quiet ]; then quiet=; fi
+done
 
 # The folder is mounted read-only and copied inside the container, so the install leaves nothing
 # behind in it; --rm removes the container. pytest arguments travel as positional parameters.
@@ -61,7 +73,7 @@ inner='cp -r /src /work && cd /work &&
   pip install -q --no-deps -r requirements.lock -r requirements-build.lock &&
   pip install -q --no-deps --no-build-isolation -e . &&
   pip install -q pytest==8.4.2 &&
-  exec pytest -q "$@"'
+  exec pytest '"$quiet"' "$@"'
 remote="docker run --rm --name $CONTAINER -v $DIR:/src:ro $PYTHON_IMAGE sh -c $(printf '%q' "$inner") sh"
 if [ "$#" -gt 0 ]; then
   remote+=" $(printf '%q ' "$@")"
