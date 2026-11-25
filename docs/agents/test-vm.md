@@ -27,6 +27,30 @@ RUN=dp02 bash scripts/test-on-vm.sh tests/test_config.py -x  # arguments go to p
 
 The script does the steps below for you: it copies the working tree to `/root/itop-mcp-server-$RUN`, runs pytest in a throwaway container `$RUN-pytest` (the Python image from the `Dockerfile`'s `FROM` line, and the lock files), prints the output, removes the folder and the container again, also on failure or Ctrl-C, and exits with pytest's exit code. It refuses to start if the folder already exists, so it never touches another run. If the VM cannot be reached, it stops with ssh's error and exit code 255. pytest runs with `-q` unless you pass `-q` yourself, so the summary line always shows. Without `RUN` it picks a random `dev-<hex>` name. pytest needs no port. `VM_HOST`, `VM_KEY` and `VM_KNOWN_HOSTS` override the connection settings in the table above.
 
+## One command for a test-stack run: `scripts/stack-on-vm.sh`
+
+A whole run of `test-stack/` (start, checks, clean-up) from Git Bash in your checkout or worktree:
+
+```sh
+RUN=it-ti02 bash scripts/stack-on-vm.sh                # Caddy stack, all checks
+RUN=it-ti02 bash scripts/stack-on-vm.sh --nginx        # nginx variant (adds compose.nginx.yaml)
+RUN=it-ti02 bash scripts/stack-on-vm.sh -- -v          # arguments after -- go to checks.py
+```
+
+It copies the working tree to `/root/itop-mcp-server-$RUN`, takes a VM slot (see [Sharing the VM](#sharing-the-vm)), makes the test certificates, starts the stack as compose project `$RUN` with `TEST_TAG=$RUN` (images `itop-mcp-test-itop:$RUN`, `itop-mcp-server:$RUN`, `itop-mcp-test-client:$RUN`), waits until the setup is complete, runs the checks with their output straight through, and exits with their exit code. Afterwards it always takes the stack down with its volumes and removes its images, its folder and its slot, also on failure or Ctrl-C. The build and start output goes to a log on the VM; when the start fails, the script prints its last lines and the setup's log.
+
+| Exit code | Meaning |
+| --- | --- |
+| the checks' code | the checks ran (0: no check failed) |
+| 2 | wrong usage, or this RUN is already in use on the VM (folder, slot or compose project) |
+| 3 | the stack did not start (or not within `START_TIMEOUT`, default 1500 s) |
+| 4 | no VM slot within `VM_SLOT_TIMEOUT` (default 1800 s) |
+| 255 | SSH failed: VM not reachable, key refused or connection lost |
+
+RUN names must be unique on the whole VM, across repos: the compose project name is the bare `$RUN`, so an iTop and a Dolibarr run with the same name would share one project. Prefix the name with the repo, e.g. `it-ti02` here and `dl-ti02` in Dolibarr. The script refuses to start (exit 2) when the folder exists, when any slot already has that RUN, or when the VM has a container, volume or network of compose project `$RUN`. `RUN` must not be `local`, `latest`, `test-stack`, `itop-mcp-test` or `itop-mcp-smoke`, the stack's shared default tags and project names. The stack publishes no ports, so runs need no port of their own. `VM_HOST`, `VM_KEY` and `VM_KNOWN_HOSTS` work as for `test-on-vm.sh`; `VM_SLOT_MAX` (3) and `VM_SLOT_MIN_MB` (3072) change the slot rule. Without `test-stack/llm.env` on the VM the chat check is skipped, and the script never copies a key there.
+
+If the script was killed so hard that its clean-up could not run (or SSH was gone), clean up by hand as described in [Clean up](#clean-up) and remove the slot: `rm -f /var/lib/test-vm-slots/itop-mcp-server-$RUN.lease`.
+
 The sections below are the manual steps, for the smoke test and for debugging.
 
 ## Connect
@@ -42,6 +66,7 @@ The VM's RAM, not the number of agents, limits how many runs fit at once. It has
 
 - A **ticket stack** is a full test stack started for one ticket under its own RUN name. Starting one takes a **VM slot**.
 - At most 3 ticket stacks run at the same time. Start one only if at least 3 GB are available: `$SSH "free -m | awk '/^Mem:/{print \$7}'"` must print 3072 or more. If not, wait or ask the orchestrator.
+- `scripts/stack-on-vm.sh` keeps this rule for you: a **slot** is a lease file `/var/lib/test-vm-slots/<repo>-<RUN>.lease`, taken under `flock` on `/var/lib/test-vm-slots/.lock` only while fewer than 3 leases exist and at least 3072 MB are available; otherwise the script waits and says why. The folder is shared by every repo that uses the VM, so the limit counts all their stacks together. A lease whose run folder is gone for 15 minutes, or that is older than 3 hours, counts as left over by a killed run and is dropped. When you start a stack by hand, take a slot the same way or count the leases yourself.
 - Take your stack down right after the run, also when it failed: `docker compose -p $RUN down -v --remove-orphans`, then remove your images (see Clean up).
 - Never stop, change or read stacks, folders or files you did not create, including other stacks' `.env` and key files. Some stacks on the VM run permanently on purpose.
 
