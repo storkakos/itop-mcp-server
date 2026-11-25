@@ -12,6 +12,36 @@ A throwaway VM on the maintainer's LAN for running the tests and anything that n
 
 No password is written down anywhere. If the key is missing or rejected, ask the maintainer. Don't try to guess or recover a password.
 
+## Only `vm-runner` uses the VM
+
+When several agents work at once, exactly one session, the pane **`vm-runner`**, talks to the VM. **Ticket agents never run `ssh`, `scripts/test-on-vm.sh` or `scripts/stack-on-vm.sh` themselves**, not even to look. They commit, queue a request and wait for the result file. Each agent starting its own stacks made runs slow and fought over the VM's RAM; one runner with a queue does not.
+
+The queue is the folder `.vm-queue/` in the workspace, next to the repos: `../.vm-queue/` from the main checkout's root. From a worktree, go through the main checkout (see [issue-tracker.md](issue-tracker.md#where-scratch-lives)):
+
+```sh
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+QUEUE="$MAIN/../.vm-queue"
+cat "$QUEUE/README.md"
+```
+
+**`../.vm-queue/README.md` is the single source of the protocol.** Read it before you queue; if this summary and the README ever disagree, the README wins. In short:
+
+- **Request** `<agent>.md`, written only after the commit: `agent`, `repo`, `branch`, `commit`, `target` (the branch you will be merged into), `kind` (`batch` or `single`), `needs` (`stack`, `pytest`, `lint`, `stack+pytest`), `variant` (`caddy`, `nginx`, `both`), `checks` (check groups or `all`), `pytest` (paths or `all`), `llm` (`key`, `none`, `both`) and `proves` (which criteria the run proves). One request per agent; to re-queue, overwrite it with the new commit and delete your old result.
+- **`batch`** (default): the runner may merge your branch with other queued branches of the same repo into a temporary integration branch (from `target`) and test them all in one stack with only the check groups the requests need. **`single`**: a run that cannot be shared (a deliberately failing check, Ctrl-C, a scenario step by step); you give the exact `## Steps` and, for temporary changes, a `## Patch`, never a commit.
+- **Result** `<agent>.result.md`, written only by `vm-runner`: `commit`, `status` (`PASS`, `FAIL`, `CONFLICT`, `ERROR`), `run` (the RUN name and what it included), `summary` and an excerpt. What to do with each status is in [issue-tracker.md](issue-tracker.md#testing-through-the-vm-queue).
+- **Finding the culprit**: when a batch run fails, the runner reruns the failing check group (or test) per branch. The branch that fails alone gets `FAIL` with its lines; the others get `PASS`. A branch that does not merge cleanly gets `CONFLICT` and is run alone or sent back for a rebase.
+
+### What the runner takes care of
+
+These are `vm-runner`'s job, not the ticket agent's:
+
+- the VM rules in [Sharing the VM](#sharing-the-vm): at most 3 stacks at once, a VM slot per stack, enough free RAM;
+- unique RUN names across repos (prefixed `it-`, `dl-`, `ra-`);
+- the shared LLM key (see [LLM key](#llm-key)): pointing runs at it, never printing it;
+- the [clean-up](#clean-up) after every run: stacks, volumes, networks, images, folders and slots of its RUNs, plus its integration branches and worktrees (local only, never pushed).
+
+The rest of this file is the reference for the runner, and for the maintainer working alone without the queue.
+
 ## Tests always run on the VM
 
 Run pytest and the smoke test on the VM, never locally on the Windows dev machine. The smoke test needs Docker, which only the VM has. pytest would run on Windows, but the virus scanner there slows the suite down to about 12 minutes, so a local run looks like a hang. On the VM the whole suite takes about 15 to 25 seconds.
@@ -105,7 +135,7 @@ $SSH
 
 ## Sharing the VM
 
-The VM's RAM, not the number of agents, limits how many runs fit at once. It has no swap; when RAM runs out, SSH stops answering for many minutes and the kernel kills containers of other runs.
+This section is `vm-runner`'s job (see [Only `vm-runner` uses the VM](#only-vm-runner-uses-the-vm)). The VM's RAM, not the number of agents, limits how many runs fit at once. It has no swap; when RAM runs out, SSH stops answering for many minutes and the kernel kills containers of other runs.
 
 - A **ticket stack** is a full test stack started for one ticket under its own RUN name. Starting one takes a **VM slot**.
 - At most 3 ticket stacks run at the same time. Start one only if at least 3 GB are available: `$SSH "free -m | awk '/^Mem:/{print \$7}'"` must print 3072 or more. If not, wait or ask the orchestrator.
