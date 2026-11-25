@@ -5,6 +5,11 @@
 #   docker compose up -d --build      # downloads iTop, installs and configures everything
 #   docker compose logs -f setup      # wait for "setup complete"
 #   docker compose run --rm client python checks.py
+#
+# Only check groups without LibreChat (see README.md, "Check groups"): start the setup alone, which
+# starts neither LibreChat nor Mongo, then run those groups:
+#   docker compose up -d --build setup && docker compose wait setup
+#   docker compose run --rm client python checks.py prerequisites
 name: itop-mcp-test
 
 x-net: &net
@@ -37,7 +42,7 @@ services:
   # against the manual's SHA256) and installs a plain iTop; the setup service does the rest.
   itop:
     build: ./itop
-    image: itop-mcp-test-itop:3.2.3
+    image: itop-mcp-test-itop:${TEST_TAG:-3.2.3}
     depends_on: [db]
     volumes:
       - itop-www:/var/www/itop
@@ -65,7 +70,7 @@ services:
   # The MCP server from this repo (built from the repo root).
   mcp:
     build: ..
-    image: itop-mcp-server:test-stack
+    image: itop-mcp-server:${TEST_TAG:-test-stack}
     environment:
       ITOP_BASE_URL: https://itop.example.com
       MCP_RESOURCE_URL: https://mcp.example.com/mcp
@@ -84,7 +89,7 @@ services:
   # One-shot: runs the manuals' steps (setup wizard, config edits, Keycloak realm, test users).
   setup:
     build: ./client
-    image: itop-mcp-test-client:local
+    image: itop-mcp-test-client:${TEST_TAG:-local}
     command: ["python", "setup.py"]
     depends_on: [proxy, itop, keycloak, mcp, mail]
     volumes:
@@ -95,6 +100,7 @@ services:
       REQUESTS_CA_BUNDLE: /ca.crt
     <<: *net
 
+  # mongo and librechat are needed only by the check group "librechat" (client/groups/librechat.py).
   mongo:
     image: mongo:8.0.38
     command: ["mongod", "--noauth"]
@@ -112,7 +118,8 @@ services:
     env_file:
       - ./librechat/librechat.env
       # Your own LLM key, never committed (see README). Without it, check 7 is skipped.
-      - path: ./llm.env
+      # LLM_ENV_FILE points elsewhere, e.g. at the test VM's shared key (scripts/stack-on-vm.sh).
+      - path: ${LLM_ENV_FILE:-./llm.env}
         required: false
     environment:
       HOST: 0.0.0.0
@@ -120,14 +127,18 @@ services:
       MONGO_URI: mongodb://mongo:27017/LibreChat
       NODE_EXTRA_CA_CERTS: /certs/ca.crt
       SEARCH: "false"
+      # Test stack only: LibreChat's login limit (every request under /oauth/ per IP, LOGIN_MAX per
+      # LOGIN_WINDOW minutes; LibreChat's default 7 per 5) raised so that the check list can run several
+      # times in a row. The example setup keeps LibreChat's default (see README, "LibreChat's login limit").
+      LOGIN_MAX: ${TEST_LIBRECHAT_LOGIN_MAX:-100}
     volumes:
       - ./librechat/librechat.yaml:/app/librechat.yaml:ro
       - ./certs/ca.crt:/certs/ca.crt:ro
     <<: *net
 
-  # Runs the check lists: docker compose run --rm client python checks.py
+  # Runs the check lists: docker compose run --rm client python checks.py [GROUP ...]
   client:
-    image: itop-mcp-test-client:local
+    image: itop-mcp-test-client:${TEST_TAG:-local}
     profiles: [checks]
     command: ["python", "checks.py"]
     volumes:
@@ -136,7 +147,7 @@ services:
     environment:
       REQUESTS_CA_BUNDLE: /ca.crt
     env_file:
-      - path: ./llm.env
+      - path: ${LLM_ENV_FILE:-./llm.env}
         required: false
     <<: *net
 

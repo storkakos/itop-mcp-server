@@ -1,4 +1,9 @@
-"""TEST ONLY. Drives iTop's setup wizard like a browser: an upgrade that ticks the given extensions."""
+"""TEST ONLY. Drives iTop's setup wizard like a browser: an upgrade that ticks the given extensions.
+
+Extensions are picked by their extension code, never by the label the wizard shows: an extension's label can
+differ from its module's label (e.g. "OpenID Authentication" vs "oAuth/OpenID authentication"). The wizard
+gives each extension checkbox the extension code as its id (with a data-id fallback); the label is display only.
+"""
 import json
 import re
 
@@ -7,13 +12,21 @@ from bs4 import BeautifulSoup
 from common import ITOP, ITOP_ADMIN, browser, form_data, say
 
 
-def run_upgrade(ticks: list[str]) -> None:
+def _choice_code(box) -> str:
+    """The extension code of a wizard checkbox: its id, or the data-id of the choice it sits in."""
+    holder = box if box.has_attr("data-id") else box.find_parent(attrs={"data-id": True})
+    return holder["data-id"] if holder is not None else box.get("id", "")
+
+
+def run_upgrade(codes: list[str]) -> None:
+    """Run the setup wizard as an upgrade and tick the extensions with the given extension codes."""
     b = browser()
     r = b.get(f"{ITOP}/setup/")
     if BeautifulSoup(r.text, "lxml").find("input", attrs={"name": "auth_user"}):
         b.post(r.url, data={"auth_user": ITOP_ADMIN[0], "auth_pwd": ITOP_ADMIN[1], "loginop": "login"})
     r = b.get(f"{ITOP}/setup/wizard.php")
-    found = set()
+    found: set[str] = set()
+    offered: dict[str, str] = {}
     for _ in range(30):
         soup = BeautifulSoup(r.text, "lxml")
         cls_el = soup.find("input", id="_class")
@@ -29,15 +42,23 @@ def run_upgrade(ticks: list[str]) -> None:
             d["accept_license"] = "yes"
         if cls == "WizStepModulesChoice":
             for box in form.find_all("input", attrs={"type": "checkbox"}):
-                lab = form.find("label", attrs={"for": box.get("id")})
+                code = _choice_code(box)
+                lab = form.find("label", attrs={"for": box.get("id")}) if box.get("id") else None
                 label = lab.get_text(" ", strip=True) if lab else ""
-                if label in ticks:
-                    d[box["name"]] = box.get("value", "on")
-                    found.add(label)
-                    say("     ticked:", label)
+                offered[code] = label
+                if code in codes:
+                    found.add(code)
+                    if box.has_attr("name"):
+                        d[box["name"]] = box.get("value", "on")
+                        say("     ticked:", code, f"({label})" if label else "")
+                    else:  # an installed extension: ticked and locked, nothing to submit
+                        say("     already installed:", code, f"({label})" if label else "")
         if cls == "WizStepSummary":
-            if set(ticks) - found:
-                raise SystemExit(f"setup wizard: checkbox not found: {set(ticks) - found}")
+            missing = [c for c in codes if c not in found]
+            if missing:
+                raise SystemExit(
+                    "setup wizard: extension code(s) not offered by the wizard: " + ", ".join(missing)
+                    + "; offered: " + ", ".join(f"{c} ({l})" for c, l in offered.items()))
             params = soup.find("input", id="installer_parameters")["value"]
             say("     modules:", ", ".join(json.loads(params)["selected_modules"][-8:]), "...")
             authent = soup.find("input", id="authent_token")["value"]

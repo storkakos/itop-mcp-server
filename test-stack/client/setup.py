@@ -46,7 +46,7 @@ def main() -> None:
     if not (W / "env-production" / "altioo-oauth-server").exists():
         say("prerequisites, steps 3-4: config writable, setup wizard as upgrade")
         os.chmod(CONFIG, 0o640)
-        wizard.run_upgrade(["Altioo OAuth Server", "oAuth/OpenID authentication"])
+        wizard.run_upgrade(["altioo-oauth-server", "combodo-hybridauth"])
 
     say("prerequisites, step 5 + Configure iTop; example: iTop log in with Keycloak")
     os.chmod(CONFIG, 0o640)

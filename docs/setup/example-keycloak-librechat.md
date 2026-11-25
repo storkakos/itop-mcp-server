@@ -37,6 +37,7 @@ Before you start:
 7. [Keycloak: client for LibreChat](#keycloak-client-for-librechat)
 8. [LibreChat](#librechat)
 9. [Check list](#check-list)
+10. [Both MCP servers in one LibreChat](#both-mcp-servers-in-one-librechat)
 
 ## Example hostnames
 
@@ -129,6 +130,9 @@ iTop logs users in through a **confidential** OpenID Connect client named `itop`
 | | Valid redirect URIs | `https://itop.example.com/env-production/combodo-hybridauth/landing.php` (exactly this, no wildcard) |
 | | Valid post logout redirect URIs | empty |
 | | Web origins | empty (iTop calls Keycloak from the server, not from the browser) |
+| Logout settings | Front channel logout | **On** |
+| | Front-channel logout URL | `https://itop.example.com/pages/logoff.php` (iTop's own logoff page) |
+| | Backchannel logout URL | empty (iTop has no endpoint for it) |
 
 Why these values:
 
@@ -141,6 +145,13 @@ Why these values:
 - **Redirect URI exact.** Keycloak compares redirect URIs case-sensitively. The path comes from the
   folder name `combodo-hybridauth` in iTop's `extensions/` folder, so it must not contain a version
   number.
+- **Front-channel logout to iTop.** A Keycloak logout (for example LibreChat's **Log out**, see
+  [Log out of Keycloak too](#env-log-out-of-keycloak-too)) ends only Keycloak's own session unless
+  Keycloak knows how to log the user out of iTop. With this URL, Keycloak's logout page loads iTop's
+  logoff page in the browser, and iTop's session ends too. Without it, iTop stays logged in as the
+  previous user: if someone else then logs into LibreChat in the same browser and connects iTop, the
+  consent page is shown for the previous user's iTop account, and that person's token ends up in the
+  new user's LibreChat.
 
 ### Users in Keycloak
 
@@ -354,13 +365,16 @@ it in [LibreChat](#librechat).
 | Login settings | Root URL | `https://chat.example.com` |
 | | Home URL | `https://chat.example.com/` |
 | | Valid redirect URIs | `https://chat.example.com/oauth/openid/callback` (exactly this, no wildcard) |
-| | Valid post logout redirect URIs | empty |
+| | Valid post logout redirect URIs | `https://chat.example.com/login` (LibreChat's login page, see [Log out of Keycloak too](#env-log-out-of-keycloak-too)) |
 | | Web origins | empty (LibreChat calls Keycloak from the server, not from the browser) |
 
 The reasons are the same as for the [`itop` client](#keycloak-client-for-itop): authorization code
 flow only, exact redirect URI. **Require PKCE** off means Keycloak accepts a login with or without
 PKCE. LibreChat sends PKCE (`S256`) when `OPENID_USE_PKCE=true`, and the client secret protects the
-code exchange either way.
+code exchange either way. The **post logout redirect URI**
+is where Keycloak sends the browser after LibreChat's logout. Without it, Keycloak answers the logout
+with "Invalid redirect uri" and keeps the session, so the next **Sign in with Keycloak** logs the same
+person in without a password.
 
 LibreChat users are the same realm users as iTop users, so the rules in
 [Users in Keycloak](#users-in-keycloak) apply to them too. LibreChat also needs the `email` client
@@ -407,6 +421,38 @@ OPENID_USE_PKCE=true
   **Require PKCE** off on the `librechat` client.
 - If only Keycloak users should use LibreChat, also set `ALLOW_REGISTRATION=false`. Keep
   `ALLOW_EMAIL_LOGIN` as it is if you need a local LibreChat admin account.
+
+### `.env`: log out of Keycloak too
+
+By default, LibreChat's **Log out** only ends the LibreChat session. The Keycloak session stays, and
+the next **Sign in with Keycloak** logs the same person in again without asking for a password: on a
+shared computer the next user gets the previous user's account, and nobody can switch to another
+account. Add these keys so that the logout ends the Keycloak session too:
+
+```sh
+# Log out of Keycloak as well, then come back to LibreChat's login page.
+OPENID_USE_END_SESSION_ENDPOINT=true
+OPENID_POST_LOGOUT_REDIRECT_URI=https://chat.example.com/login
+```
+
+- `OPENID_USE_END_SESSION_ENDPOINT=true` makes LibreChat send the browser to Keycloak's logout
+  endpoint (the realm's `end_session_endpoint`) after its own logout.
+- `OPENID_POST_LOGOUT_REDIRECT_URI` is where Keycloak sends the browser afterwards. It must be listed
+  exactly under **Valid post logout redirect URIs** of the
+  [`librechat` client](#keycloak-client-for-librechat). Without the key, LibreChat sends
+  `DOMAIN_CLIENT` + `/login`, the same URL; the key makes it explicit.
+- When LibreChat still has the user's ID token, Keycloak logs out at once. Otherwise Keycloak first
+  asks "Do you want to log out?"; after **Logout** the browser lands on LibreChat's login page.
+- The logout ends the user's Keycloak session for every application. iTop's own session in the
+  browser ends too, through the **front-channel logout** of the [`itop` client](#keycloak-client-for-itop):
+  Keycloak's logout page loads iTop's logoff page in an iframe. The connection of LibreChat to the
+  MCP server stays; it belongs to the LibreChat user, not to the browser.
+- The front-channel logout works only if the browser sends iTop's session cookie inside that iframe.
+  That is the case when iTop and Keycloak are on the same site (like `itop.example.com` and
+  `sso.example.com`). If they are on different domains, browsers that block third-party cookies send
+  no cookie, and iTop stays logged in. It also does not reach an iTop session that was opened with
+  iTop's own login form instead of **Sign in with Keycloak**. In those cases log out of iTop by hand,
+  or let each person use their own browser profile.
 
 LibreChat sits behind your reverse proxy. The proxy must pass `X-Forwarded-Proto: https` to
 LibreChat. Otherwise LibreChat does not set its session cookie during the Keycloak login, and the
@@ -612,7 +658,7 @@ at Keycloak, and land on the altioo-oauth-server **consent page** naming the cli
 | Result | Fix |
 |---|---|
 | After the Keycloak login you land on iTop's home page instead of the consent page | iTop and hybridauth return to the page you came from only if its URL, as PHP sees it, starts with iTop's `app_root_url`. Behind a reverse proxy that terminates TLS, PHP sees `http` and port 80. See [PHP behind a reverse proxy](itop-prerequisites.md#php-behind-a-reverse-proxy) in the prerequisites; it covers both iTop's own login and hybridauth. Then start the connection in the client again. |
-| "Personal tokens not allowed", refusal before the consent page, "Unknown resource" | Not related to Keycloak: see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). The External user needs the same profiles as a local user would. |
+| "Personal tokens not allowed", "Not available for your account" on the consent page, "Unknown resource" | Not related to Keycloak: see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). The External user needs the same profiles as a local user would. |
 
 ### 5. A Keycloak user logs into LibreChat
 
@@ -653,7 +699,7 @@ closes the tab, and the dot next to **iTop** in the **MCP Servers** panel turns 
 | LibreChat shows an error before any iTop page, and its log says the client registration failed | LibreChat's callback is not in `redirect_uris`: see [iTop: allow LibreChat's callback](#itop-allow-librechats-callback). iTop's error log (channel `altioo-oauth-server`) names the callback LibreChat sent; it must be exactly `https://chat.example.com/api/mcp/itop/oauth/callback`. If it starts with `http://localhost:3080`, `DOMAIN_SERVER` is not set. |
 | iTop says "Unknown resource" | `url` under `mcpServers` → `itop`, `MCP_RESOURCE_URL` and the `itop-mcp` resource in iTop differ. See check 4 of [the prerequisites](itop-prerequisites.md#4-the-resource-url-matches-in-all-three-places). |
 | After the Keycloak login you land on iTop's home page instead of the consent page | See check 4 above. |
-| Refusal before the consent page | The iTop user lacks the profiles; see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
+| The consent page says "Not available for your account" – "Your profiles do not give access to what this application asks for" | The iTop user on the consent page lacks the profiles; see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). Check first *who* that user is: the consent page uses the iTop session the browser already has. If this browser was logged into iTop as someone else (for example `admin`), you land on the consent page as that person, even though another user is logged into LibreChat. Log out of iTop, use a private browser window, or log into iTop as the intended user first, then connect again. |
 | The tab ends on a LibreChat error page after consent | Check LibreChat's log for the token exchange with iTop, and iTop's error log (channel `altioo-oauth-server`). |
 
 ### 7. `whoami` names the logged-in iTop user
@@ -675,3 +721,115 @@ more.
 | The model answers without calling a tool | The model does not support tool calls, or the `itop` server is not switched on in this chat. |
 | `Angemeldet in iTop als: ?` | The token works, but the iTop user has no linked Person (**Contact** of the External user). If the client never connects at all, see check 5 of [the prerequisites](itop-prerequisites.md#5-an-mcp-client-can-connect). |
 | Another person's name | The browser was still logged into iTop as someone else when consent was given in check 6, and iTop issued the token for that user. Disconnect **iTop** in LibreChat, log out of iTop, and connect again. Each user should give consent in their own browser session. |
+
+### 8. After a logout, Keycloak asks for a password again
+
+In LibreChat, click your name at the bottom left, then **Log out**. Then click **Sign in with
+Keycloak**.
+
+**Expected:** after the logout the browser lands on LibreChat's login page (possibly after Keycloak's
+"Do you want to log out?" with **Logout**). **Sign in with Keycloak** shows Keycloak's login form
+again, and a second user can log in with their own username and password. Opening
+`https://itop.example.com/` in the same browser shows iTop's login page, and when the second user
+connects **iTop** in LibreChat, the consent page names *their* iTop account
+("... wants to act as `bob@example.com` on this iTop").
+
+**If not:**
+
+| Result | Fix |
+|---|---|
+| Keycloak: "Invalid redirect uri" after **Log out** | `OPENID_POST_LOGOUT_REDIRECT_URI` is not listed exactly under **Valid post logout redirect URIs** of the `librechat` client. |
+| **Sign in with Keycloak** logs the previous user in without a form | `OPENID_USE_END_SESSION_ENDPOINT` is not `true` (restart LibreChat after changing `.env`), so LibreChat never sent the browser to Keycloak's logout. |
+| iTop is still logged in as the previous user, and the consent page names the previous user | The `itop` client has no **Front channel logout** with the **Front-channel logout URL** `https://itop.example.com/pages/logoff.php`, or iTop and Keycloak are on different sites (see [Log out of Keycloak too](#env-log-out-of-keycloak-too)). Click **Deny**, log out of iTop, then connect again. |
+| LibreChat refuses the login as rate limited (`auth_rate_limited`) | LibreChat allows about 7 logins per 5 minutes per IP. Wait five minutes. |
+
+## Both MCP servers in one LibreChat
+
+To offer iTop and Dolibarr in the same LibreChat, run both MCP servers side by side and add both to
+the same `librechat.yaml`. This section lists only what differs from the single-server setup above.
+The Dolibarr side (Dolibarr's own settings and callback) is in the
+[Dolibarr MCP server's example setup](https://github.com/storkakos/dolibarr-mcp-server/blob/main/docs/setup/example-keycloak-librechat.md).
+
+| Example | What it is |
+|---|---|
+| `https://mcp-itop.example.com/mcp` | iTop MCP server (its `MCP_RESOURCE_URL`) |
+| `https://mcp-erp.example.com/mcp` | Dolibarr MCP server (its `MCP_RESOURCE_URL`) |
+| `https://chat.example.com/api/mcp/itop/oauth/callback` | LibreChat's callback for iTop, in `redirect_uris` of **iTop's** altioo-oauth-server |
+| `https://chat.example.com/api/mcp/dolibarr/oauth/callback` | LibreChat's callback for Dolibarr, on **restoauth's** redirect allowlist |
+
+- **Each server has its own public hostname (or path) and its own resource URL.** Both MCP servers
+  listen on their own port behind the reverse proxy, and each has its own `MCP_RESOURCE_URL`. The two
+  servers must not share a URL.
+- **Each server has its own OAuth callback**, built from its name in `librechat.yaml`
+  (`/api/mcp/<server name>/oauth/callback`), so the names `itop` and `dolibarr` give two different
+  callbacks. Each goes only on the allowlist of its own system: iTop's in `redirect_uris` of
+  altioo-oauth-server, Dolibarr's in restoauth's **Allowed redirect URIs**. Each system's
+  resource setting lists only its own MCP server's URL.
+- **`allowedDomains` lists all four hosts:** both MCP servers and both systems (iTop and Dolibarr).
+  A host that is missing fails as described under
+  [`mcpSettings`](#librechatyaml-the-itop-mcp-server).
+- **One Keycloak client for LibreChat.** Both systems use the same Keycloak realm and the same
+  `librechat` client for the login to LibreChat itself. The OAuth flows of the two MCP servers do
+  not involve that client.
+
+`librechat.yaml`:
+
+```yaml
+mcpServers:
+  itop:
+    type: streamable-http
+    url: https://mcp-itop.example.com/mcp
+    title: iTop
+    description: Tickets, CIs and contacts from iTop, with your own iTop rights
+    requiresOAuth: true
+  dolibarr:
+    type: streamable-http
+    url: https://mcp-erp.example.com/mcp
+    title: Dolibarr
+    description: Third parties, invoices, proposals, orders and products from Dolibarr, with your own Dolibarr rights
+    requiresOAuth: true
+
+mcpSettings:
+  allowedDomains:
+    - "https://mcp-itop.example.com"
+    - "https://mcp-erp.example.com"
+    - "https://itop.example.com"
+    - "https://erp.example.com"
+
+modelSpecs:
+  list:
+    - name: itop-dolibarr-assistant
+      label: iTop + Dolibarr assistant
+      description: Answers questions about iTop and Dolibarr with your own rights in each
+      preset:
+        # An endpoint and model you have already set up in LibreChat.
+        endpoint: <your endpoint>
+        model: <your model>
+      mcpServers:
+        - itop
+        - dolibarr
+```
+
+Keep the single-server specs next to it if you want them: a spec with `mcpServers: [itop]` only
+offers iTop. The options for preselecting a model spec work as described above.
+
+**Check:** each user connects both servers once (each shows its own consent page, in the user's own
+iTop or Dolibarr session), then starts a chat with the **iTop + Dolibarr assistant** and asks for
+both `whoami` tools:
+
+> Use the whoami tool of iTop and the whoami tool of Dolibarr: who am I in each?
+
+**Expected:** two tool calls, one named after each server. iTop's answer contains
+`Angemeldet in iTop als: <name>`, Dolibarr's result contains `"user"` with the Dolibarr user. The
+names differ if the user has different display names in the two systems.
+
+**If not:** a server whose OAuth connection fails shows the symptoms of the single-server
+[check list](#check-list) (check 6) for that server only; the other one keeps working.
+
+Tested in a combined run on the test VM (the run of the Dolibarr MCP server's twin ticket c04, which
+covers both servers): one Keycloak realm, one LibreChat v0.8.9, iTop 3.2.3 with altioo-oauth-server
+and Dolibarr 23.0.4 with restoauth 0.2.2, both MCP servers behind one TLS proxy under the hostnames
+of the table above. LibreChat loaded exactly this configuration, and an MCP client went through the
+OAuth flow (Keycloak login, consent) of both servers and called both `whoami` tools. The chat
+itself, one model calling both tools, was not repeated in that run (no approved LLM key); it was
+verified in an earlier combined run with a model behind LibreChat.

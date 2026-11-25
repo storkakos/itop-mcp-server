@@ -1,7 +1,7 @@
 """TEST ONLY. The config-itop.php edits of the two manuals, applied as an admin would type them."""
 import re
 
-from common import KC_SECRET_ITOP
+from common import KC_SECRET_ITOP, MCP
 
 # docs/setup/itop-prerequisites.md, "Settings in $MyModuleSettings"
 PREREQ_BLOCK = """
@@ -26,7 +26,7 @@ PREREQ_BLOCK = """
 
 		'resources' => array(
 			'itop-mcp' => array(
-				'url' => 'https://mcp.example.com/mcp',
+				'url' => '%s',
 				'label' => 'iTop assistant',
 				'scope_prefix' => 'REST/JSON',
 				'default_scopes' => array('REST/JSON'),
@@ -36,7 +36,7 @@ PREREQ_BLOCK = """
 		),
 	),
 
-"""
+""" % MCP
 
 # docs/setup/example-keycloak-librechat.md, "combodo-hybridauth in $MyModuleSettings"
 HYBRIDAUTH_BLOCK = """	'combodo-hybridauth' => array(

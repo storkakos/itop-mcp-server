@@ -173,6 +173,31 @@ server {
 }
 ```
 
+nginx, under a path prefix of a host that serves other things too, e.g.
+`MCP_RESOURCE_URL=https://apps.example.com/itop-mcp/mcp`. Put both locations into the existing
+`server` block of that host. The first strips the prefix (the server answers on `/mcp`), the
+second forwards the protected resource metadata unchanged: MCP clients fetch it at the site root,
+with the prefix after `/.well-known/oauth-protected-resource`.
+
+```nginx
+location /itop-mcp/ {
+    proxy_pass http://127.0.0.1:8130/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+}
+location = /.well-known/oauth-protected-resource/itop-mcp/mcp {
+    proxy_pass http://127.0.0.1:8130;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Both nginx blocks are tested: the [test stack](test-stack/README.md#nginx-as-tls-proxy) builds its
+nginx configuration from them.
+
 Apache (`mod_proxy`, `mod_proxy_http`, `mod_ssl`):
 
 ```apache
@@ -329,6 +354,15 @@ iTop (network, proxy, or certificate, see [Internal CA](#internal-ca)).
 **`421 Misdirected Request` through the reverse proxy** (on every path, with or without a token). The
 proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. See [Reverse proxy](#reverse-proxy-tls).
 
+**The consent page says "Not available for your account" – "Your profiles do not give access to what
+this application asks for".** The iTop user on the consent page has none of the profiles allowed to
+connect (`required_profiles` of the `itop-mcp` resource, and `personal_tokens_allowed_profiles`).
+For `Administrator` this is by design. An administrator grants access by giving the user one of those
+profiles in iTop. If the user already has them, the browser still holds an iTop session of someone
+else (for example the admin): the consent page uses that session, not the LibreChat user. Log out of
+iTop, use a private browser window, or log into iTop as the intended user first, then connect again.
+See [check 5 of the prerequisites](docs/setup/itop-prerequisites.md#5-an-mcp-client-can-connect).
+
 **The OAuth flow ends with "Unknown resource" in iTop.** `MCP_RESOURCE_URL` and the `itop-mcp`
 resource in `config-itop.php` differ. See [Prerequisites on the iTop side](#prerequisites-on-the-itop-side).
 
@@ -361,7 +395,9 @@ bash scripts/test-on-vm.sh
 bash scripts/test-on-vm.sh tests/test_config.py -x
 ```
 
-See [docs/agents/test-vm.md](docs/agents/test-vm.md) for the VM, run names and cleanup.
+See [docs/agents/test-vm.md](docs/agents/test-vm.md) for the VM, run names and cleanup. When
+several agents work at once, only the `vm-runner` session runs this; ticket agents queue a request
+instead (see [Only `vm-runner` uses the VM](docs/agents/test-vm.md#only-vm-runner-uses-the-vm)).
 
 On a Linux machine, run them directly:
 
@@ -381,4 +417,6 @@ scripts/smoke-test.sh
 ```
 
 Releasing: set `__version__` in `src/itop_mcp_server/__init__.py` and the image tag in `compose.yaml`
-to the same version (a test checks this), run both test suites, then tag `vX.Y.Z`.
+to the same version (a test checks this), run both test suites and the check list of the
+[test stack](test-stack/README.md) with Caddy and with [nginx](test-stack/README.md#nginx-as-tls-proxy),
+then tag `vX.Y.Z`.

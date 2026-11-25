@@ -8,3 +8,4 @@ compose.override.yaml
 certs/
 .scratch/
 .smoke/
+itop-extension/dist/

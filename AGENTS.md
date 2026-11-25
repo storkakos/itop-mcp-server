@@ -16,4 +16,4 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 For anything that needs Docker (this machine has none), there is a test VM reachable over SSH. See `docs/agents/test-vm.md`.
 
-Tests never run locally on this machine: not pytest, not the smoke test. Run pytest with `bash scripts/test-on-vm.sh` (arguments go to pytest); it runs the suite on the test VM and cleans up after itself.
+Tests never run locally on this machine: not pytest, not the smoke test. Only the pane `vm-runner` talks to the VM. A ticket agent never runs `ssh`, `scripts/test-on-vm.sh` or `scripts/stack-on-vm.sh` itself: it commits, queues a request in the workspace's `.vm-queue/` (`../.vm-queue/README.md` from the main checkout's root is the protocol) and waits for the result. See `docs/agents/test-vm.md` (Only `vm-runner` uses the VM) and `docs/agents/issue-tracker.md` (Testing through the VM queue). The scripts themselves (`scripts/test-on-vm.sh` for pytest, `scripts/stack-on-vm.sh` for the test stack) are described in test-vm.md for the runner.
