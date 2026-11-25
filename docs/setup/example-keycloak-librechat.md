@@ -828,7 +828,7 @@ names differ if the user has different display names in the two systems.
 
 Tested in a combined run on the test VM (the run of the Dolibarr MCP server's twin ticket c04, which
 covers both servers): one Keycloak realm, one LibreChat v0.8.9, iTop 3.2.3 with altioo-oauth-server
-and Dolibarr 23.0.4 with restoauth 0.2.2, both MCP servers behind one TLS proxy under the hostnames
+and Dolibarr 23.0.4 with restoauth 0.3.0, both MCP servers behind one TLS proxy under the hostnames
 of the table above. LibreChat loaded exactly this configuration, and an MCP client went through the
 OAuth flow (Keycloak login, consent) of both servers and called both `whoami` tools. The chat
 itself, one model calling both tools, was not repeated in that run (no approved LLM key); it was
