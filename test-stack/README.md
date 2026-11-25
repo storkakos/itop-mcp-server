@@ -186,3 +186,5 @@ blocks the script, start it with `powershell -ExecutionPolicy Bypass -File .\ope
   On a shared Docker host give each run its own project name and image tag, e.g.
   `TEST_TAG=ic07 docker compose -p ic07 up -d --build` (see `docs/agents/test-vm.md`); without
   `TEST_TAG` the images keep their fixed names.
+- On the test VM, `scripts/stack-on-vm.sh` does a whole run with its own project name and image
+  tags, from start to clean-up (see `docs/agents/test-vm.md`).
