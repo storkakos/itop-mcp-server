@@ -50,8 +50,10 @@ def setup_realm() -> None:
                             "smtpServer": {"host": "mail", "port": "1025", "from": "keycloak@example.com"}}))
     R = f"{A}/{REALM}"
 
-    def client(cid, name, root, redirect, post_logout, secret):
+    def client(cid, name, root, redirect, post_logout, secret, frontchannel_logout_url=""):
         body = {
+            # Front-channel logout: on a Keycloak logout the browser loads this URL in an iframe.
+            "frontchannelLogout": bool(frontchannel_logout_url),
             "clientId": cid, "name": name, "protocol": "openid-connect", "enabled": True,
             "publicClient": False, "clientAuthenticatorType": "client-secret", "secret": secret,
             "authorizationServicesEnabled": False, "standardFlowEnabled": True,
@@ -62,6 +64,8 @@ def setup_realm() -> None:
                            "post.logout.redirect.uris": post_logout},
             "rootUrl": root, "baseUrl": root + "/", "redirectUris": [redirect], "webOrigins": [],
         }
+        if frontchannel_logout_url:
+            body["attributes"]["frontchannel.logout.url"] = frontchannel_logout_url
         found = s.get(f"{R}/clients", params={"clientId": cid}).json()
         if found:
             current = _ok(s.get(f"{R}/clients/{found[0]['id']}")).json()
@@ -70,7 +74,10 @@ def setup_realm() -> None:
             _ok(s.post(f"{R}/clients", json=body))
         say("   keycloak client", cid)
 
-    client("itop", "iTop", ITOP, f"{ITOP}/env-production/combodo-hybridauth/landing.php", "", KC_SECRET_ITOP)
+    # Front-channel logout to iTop's logoff page: a Keycloak logout (e.g. LibreChat's Log out) ends the
+    # iTop session in the browser too, so the next user does not consent as the previous one.
+    client("itop", "iTop", ITOP, f"{ITOP}/env-production/combodo-hybridauth/landing.php", "", KC_SECRET_ITOP,
+           f"{ITOP}/pages/logoff.php")
     # LibreChat's OpenID login callback and its login page after logout (OPENID_POST_LOGOUT_REDIRECT_URI).
     # Without the latter, Keycloak answers LibreChat's logout with "Invalid redirect uri" and keeps the session.
     client("librechat", "LibreChat", CHAT, f"{CHAT}/oauth/openid/callback", f"{CHAT}/login", KC_SECRET_LIBRECHAT)

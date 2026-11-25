@@ -201,8 +201,18 @@ class LibreChat:
             d = form_data(form)
             d["confirmLogout"] = "Logout"
             r = follow(self.b, self.b.post(urljoin(r.url, form.get("action") or r.url), data=d, allow_redirects=False))
+        # Front-channel logout: Keycloak shows a page that loads each client's logout URL in an iframe (for
+        # iTop: pages/logoff.php, with iTop's cookie), then continues to the post-logout redirect URI.
+        soup = BeautifulSoup(r.text, "lxml")
+        frames = [urljoin(r.url, f["src"]) for f in soup.find_all("iframe") if f.get("src")]
+        for src in frames:
+            follow(self.b, self.b.get(src, allow_redirects=False))
+        cont = soup.find("a", id="continue")
+        if frames and cont is not None and cont.get("href"):
+            r = follow(self.b, self.b.get(urljoin(r.url, cont["href"]), allow_redirects=False))
         assert "Invalid redirect uri" not in r.text,             "Keycloak: Invalid redirect uri (post logout redirect URI missing on the librechat client)"
-        return {"end_session": redirect.split("?")[0], "confirmed": confirm is not None, "landed": r.url}
+        return {"end_session": redirect.split("?")[0], "confirmed": confirm is not None, "landed": r.url,
+                "frontchannel": [urlparse(f).netloc + urlparse(f).path for f in frames]}
 
     def connect_itop(self) -> dict:
         r = self.b.post(f"{CHAT}/api/mcp/itop/reinitialize", headers=self.h, json={})

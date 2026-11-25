@@ -130,6 +130,9 @@ iTop logs users in through a **confidential** OpenID Connect client named `itop`
 | | Valid redirect URIs | `https://itop.example.com/env-production/combodo-hybridauth/landing.php` (exactly this, no wildcard) |
 | | Valid post logout redirect URIs | empty |
 | | Web origins | empty (iTop calls Keycloak from the server, not from the browser) |
+| Logout settings | Front channel logout | **On** |
+| | Front-channel logout URL | `https://itop.example.com/pages/logoff.php` (iTop's own logoff page) |
+| | Backchannel logout URL | empty (iTop has no endpoint for it) |
 
 Why these values:
 
@@ -142,6 +145,13 @@ Why these values:
 - **Redirect URI exact.** Keycloak compares redirect URIs case-sensitively. The path comes from the
   folder name `combodo-hybridauth` in iTop's `extensions/` folder, so it must not contain a version
   number.
+- **Front-channel logout to iTop.** A Keycloak logout (for example LibreChat's **Log out**, see
+  [Log out of Keycloak too](#env-log-out-of-keycloak-too)) ends only Keycloak's own session unless
+  Keycloak knows how to log the user out of iTop. With this URL, Keycloak's logout page loads iTop's
+  logoff page in the browser, and iTop's session ends too. Without it, iTop stays logged in as the
+  previous user: if someone else then logs into LibreChat in the same browser and connects iTop, the
+  consent page is shown for the previous user's iTop account, and that person's token ends up in the
+  new user's LibreChat.
 
 ### Users in Keycloak
 
@@ -433,8 +443,16 @@ OPENID_POST_LOGOUT_REDIRECT_URI=https://chat.example.com/login
   `DOMAIN_CLIENT` + `/login`, the same URL; the key makes it explicit.
 - When LibreChat still has the user's ID token, Keycloak logs out at once. Otherwise Keycloak first
   asks "Do you want to log out?"; after **Logout** the browser lands on LibreChat's login page.
-- The logout ends the user's Keycloak session for every application, iTop included. iTop's own
-  session and the connection of LibreChat to the MCP server stay.
+- The logout ends the user's Keycloak session for every application. iTop's own session in the
+  browser ends too, through the **front-channel logout** of the [`itop` client](#keycloak-client-for-itop):
+  Keycloak's logout page loads iTop's logoff page in an iframe. The connection of LibreChat to the
+  MCP server stays; it belongs to the LibreChat user, not to the browser.
+- The front-channel logout works only if the browser sends iTop's session cookie inside that iframe.
+  That is the case when iTop and Keycloak are on the same site (like `itop.example.com` and
+  `sso.example.com`). If they are on different domains, browsers that block third-party cookies send
+  no cookie, and iTop stays logged in. It also does not reach an iTop session that was opened with
+  iTop's own login form instead of **Sign in with Keycloak**. In those cases log out of iTop by hand,
+  or let each person use their own browser profile.
 
 LibreChat sits behind your reverse proxy. The proxy must pass `X-Forwarded-Proto: https` to
 LibreChat. Otherwise LibreChat does not set its session cookie during the Keycloak login, and the
@@ -711,7 +729,10 @@ Keycloak**.
 
 **Expected:** after the logout the browser lands on LibreChat's login page (possibly after Keycloak's
 "Do you want to log out?" with **Logout**). **Sign in with Keycloak** shows Keycloak's login form
-again, and a second user can log in with their own username and password.
+again, and a second user can log in with their own username and password. Opening
+`https://itop.example.com/` in the same browser shows iTop's login page, and when the second user
+connects **iTop** in LibreChat, the consent page names *their* iTop account
+("... wants to act as `bob@example.com` on this iTop").
 
 **If not:**
 
@@ -719,6 +740,7 @@ again, and a second user can log in with their own username and password.
 |---|---|
 | Keycloak: "Invalid redirect uri" after **Log out** | `OPENID_POST_LOGOUT_REDIRECT_URI` is not listed exactly under **Valid post logout redirect URIs** of the `librechat` client. |
 | **Sign in with Keycloak** logs the previous user in without a form | `OPENID_USE_END_SESSION_ENDPOINT` is not `true` (restart LibreChat after changing `.env`), so LibreChat never sent the browser to Keycloak's logout. |
+| iTop is still logged in as the previous user, and the consent page names the previous user | The `itop` client has no **Front channel logout** with the **Front-channel logout URL** `https://itop.example.com/pages/logoff.php`, or iTop and Keycloak are on different sites (see [Log out of Keycloak too](#env-log-out-of-keycloak-too)). Click **Deny**, log out of iTop, then connect again. |
 | LibreChat refuses the login as rate limited (`auth_rate_limited`) | LibreChat allows about 7 logins per 5 minutes per IP. Wait five minutes. |
 
 ## Both MCP servers in one LibreChat

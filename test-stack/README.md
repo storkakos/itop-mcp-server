@@ -45,9 +45,10 @@ downloads), then the commands above again.
 | Apache vhost: reverse-proxy settings and the `.well-known` rewrite | `itop/itop.conf` | prerequisites, "Web server rewrites", "PHP behind a reverse proxy" |
 | Copy the extensions, make the config writable, run the setup wizard as an upgrade | `client/setup.py`, `client/wizard.py` (drives the wizard pages like a browser) | prerequisites, steps 2-4 |
 | Edit `config-itop.php` | `client/config_edits.py` | prerequisites, "Configure iTop"; example, "iTop: log in with Keycloak" |
-| Realm `example`, clients `itop` and `librechat` (with the post-logout redirect URI), email lock-down, test users. An existing client is merged, not replaced: settings the setup does not own stay | `client/keycloak_realm.py` (admin REST API, the manual's values) | example, Keycloak sections |
+| Realm `example`, clients `itop` (with front-channel logout to iTop's logoff page) and `librechat` (with the post-logout redirect URI), email lock-down, test users. An existing client is merged, not replaced: settings the setup does not own stay | `client/keycloak_realm.py` (admin REST API, the manual's values) | example, Keycloak sections |
 | LibreChat `.env` (Keycloak login and logout) and `librechat.yaml` | `librechat/` | example, "LibreChat" |
 | Check lists | `client/checks.py` | both "Check list" sections |
+| User switch in one browser: A connects iTop and logs out, B logs in and connects; B must consent and get a token as B. Runs as the last check of `checks.py`; `python user_switch.py` prints each step | `client/user_switch.py` | example, check 8 |
 | nginx in front of the MCP server, also under a path prefix (nginx variant only) | `compose.nginx.yaml`, `nginx/start.sh` | README, "Reverse proxy (TLS)" |
 
 Differences from the manuals, all for a local test: the Keycloak realm is created (the manual
