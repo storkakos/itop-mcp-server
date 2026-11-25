@@ -210,8 +210,12 @@ echo "$ME: stack is up"
 args=""
 [ "$#" -gt 0 ] && args=" $(printf '%q ' "$@")"
 checks_out="$(mktemp)"
+# set +e around the pipe: with errexit and pipefail a failing check would end the script here,
+# before the key scan; PIPESTATUS is read right after the pipe, before set -e changes it.
+set +e
 vm "$IN_STACK && $DC ${CHECKS[*]}$args" | tee "$checks_out"
 status=${PIPESTATUS[0]}
+set -e
 echo "$ME: checks exit code $status"
 [ "$status" -eq 255 ] && { rm -f "$checks_out"; exit 255; }
 
