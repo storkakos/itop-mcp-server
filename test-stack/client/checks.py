@@ -295,6 +295,12 @@ def _():
             + (f", waited {switch.waited} s for LibreChat's login limit" if switch.waited else ""))
 
 
+@check("example 8: after a LibreChat logout the next user consents in iTop as themselves")
+def _():
+    import user_switch  # the scenario lives in its own file (combined-stack-findings 09)
+    return user_switch.verdict(user_switch.run())
+
+
 failed = [r for r in results if r[0] == "FAIL"]
 print(f"\n{sum(r[0] == 'PASS' for r in results)} passed, {len(failed)} failed, "
       f"{sum(r[0] == 'SKIP' for r in results)} skipped")
