@@ -32,9 +32,9 @@ The script does the steps below for you: it copies the working tree to `/root/it
 A whole run of `test-stack/` (start, checks, clean-up) from Git Bash in your checkout or worktree:
 
 ```sh
-RUN=ti02 bash scripts/stack-on-vm.sh                # Caddy stack, all checks
-RUN=ti02 bash scripts/stack-on-vm.sh --nginx        # nginx variant (adds compose.nginx.yaml)
-RUN=ti02 bash scripts/stack-on-vm.sh -- -v          # arguments after -- go to checks.py
+RUN=it-ti02 bash scripts/stack-on-vm.sh                # Caddy stack, all checks
+RUN=it-ti02 bash scripts/stack-on-vm.sh --nginx        # nginx variant (adds compose.nginx.yaml)
+RUN=it-ti02 bash scripts/stack-on-vm.sh -- -v          # arguments after -- go to checks.py
 ```
 
 It copies the working tree to `/root/itop-mcp-server-$RUN`, takes a VM slot (see [Sharing the VM](#sharing-the-vm)), makes the test certificates, starts the stack as compose project `$RUN` with `TEST_TAG=$RUN` (images `itop-mcp-test-itop:$RUN`, `itop-mcp-server:$RUN`, `itop-mcp-test-client:$RUN`), waits until the setup is complete, runs the checks with their output straight through, and exits with their exit code. Afterwards it always takes the stack down with its volumes and removes its images, its folder and its slot, also on failure or Ctrl-C. The build and start output goes to a log on the VM; when the start fails, the script prints its last lines and the setup's log.
@@ -42,12 +42,12 @@ It copies the working tree to `/root/itop-mcp-server-$RUN`, takes a VM slot (see
 | Exit code | Meaning |
 | --- | --- |
 | the checks' code | the checks ran (0: no check failed) |
-| 2 | wrong usage, or the folder or slot for this RUN already exists on the VM |
+| 2 | wrong usage, or this RUN is already in use on the VM (folder, slot or compose project) |
 | 3 | the stack did not start (or not within `START_TIMEOUT`, default 1500 s) |
 | 4 | no VM slot within `VM_SLOT_TIMEOUT` (default 1800 s) |
 | 255 | SSH failed: VM not reachable, key refused or connection lost |
 
-`RUN` must not be `local`, `latest`, `test-stack`, `itop-mcp-test` or `itop-mcp-smoke`, the stack's shared default tags and project names. The stack publishes no ports, so runs need no port of their own. `VM_HOST`, `VM_KEY` and `VM_KNOWN_HOSTS` work as for `test-on-vm.sh`; `VM_SLOT_MAX` (3) and `VM_SLOT_MIN_MB` (3072) change the slot rule. Without `test-stack/llm.env` on the VM the chat check is skipped, and the script never copies a key there.
+RUN names must be unique on the whole VM, across repos: the compose project name is the bare `$RUN`, so an iTop and a Dolibarr run with the same name would share one project. Prefix the name with the repo, e.g. `it-ti02` here and `dl-ti02` in Dolibarr. The script refuses to start (exit 2) when the folder exists, when any slot already has that RUN, or when the VM has a container, volume or network of compose project `$RUN`. `RUN` must not be `local`, `latest`, `test-stack`, `itop-mcp-test` or `itop-mcp-smoke`, the stack's shared default tags and project names. The stack publishes no ports, so runs need no port of their own. `VM_HOST`, `VM_KEY` and `VM_KNOWN_HOSTS` work as for `test-on-vm.sh`; `VM_SLOT_MAX` (3) and `VM_SLOT_MIN_MB` (3072) change the slot rule. Without `test-stack/llm.env` on the VM the chat check is skipped, and the script never copies a key there.
 
 If the script was killed so hard that its clean-up could not run (or SSH was gone), clean up by hand as described in [Clean up](#clean-up) and remove the slot: `rm -f /var/lib/test-vm-slots/itop-mcp-server-$RUN.lease`.
 

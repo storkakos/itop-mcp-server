@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # One whole test-stack run on the test VM, from this dev machine. See docs/agents/test-vm.md.
 #
-#   RUN=ti02 bash scripts/stack-on-vm.sh                 # Caddy stack, all checks
-#   RUN=ti02 bash scripts/stack-on-vm.sh --nginx         # nginx variant (compose.nginx.yaml)
-#   RUN=ti02 bash scripts/stack-on-vm.sh -- -v           # everything after -- goes to checks.py
+#   RUN=it-ti02 bash scripts/stack-on-vm.sh                 # Caddy stack, all checks
+#   RUN=it-ti02 bash scripts/stack-on-vm.sh --nginx         # nginx variant (compose.nginx.yaml)
+#   RUN=it-ti02 bash scripts/stack-on-vm.sh -- -v           # everything after -- goes to checks.py
 #
 # Steps: copy the working tree (tracked and untracked files, not git-ignored ones) to
 # /root/<repo>-$RUN on the VM, wait for a free VM slot, make the test certificates, start the stack
@@ -11,7 +11,8 @@
 # take the stack down with its volumes and remove its images, folder and slot, also on failure or
 # Ctrl-C. Exits with the checks' exit code.
 #
-# Exit codes: the checks' own code once they ran; 2 wrong usage or RUN already in use; 3 the stack
+# Exit codes: the checks' own code once they ran; 2 wrong usage or RUN already in use on the VM
+# (by any repo: RUN is the bare compose project name, so prefix it, e.g. it-ti02); 3 the stack
 # did not start (the tail of the start log is printed); 4 no VM slot within VM_SLOT_TIMEOUT;
 # 255 SSH failed (VM not reachable, key refused, connection lost).
 #
@@ -107,10 +108,20 @@ cleanup() {
 }
 
 echo "$ME: run $RUN, folder $DIR, compose project $RUN, image tags :$RUN"
+# RUN must be free on the whole VM, not only for this repo: the compose project name is the bare
+# $RUN, so a run of another repo with the same RUN would share containers, volumes and networks,
+# and either cleanup would destroy the other's stack. The traps are set only after this check, so a
+# refused run never takes anything down.
 rc=0
-vm "test ! -e $DIR && test ! -e $LEASE" || rc=$?
+vm "if [ -e $DIR ]; then echo 'its folder $DIR exists'; exit 1; fi
+  if [ -e $LEASE ] || grep -qsx 'run=$RUN' $SLOT_DIR/*.lease; then echo 'a VM slot with run=$RUN is taken'; exit 1; fi
+  for kind in 'container ls -a' 'volume ls' 'network ls'; do
+    if [ \"\$(docker \$kind -q --filter label=com.docker.compose.project=$RUN | head -n1)\" ]; then
+      echo \"compose project $RUN already has a \${kind%% *}\"; exit 1
+    fi
+  done" >&2 || rc=$?
 if [ "$rc" -ne 0 ]; then
-  echo "$ME: $DIR or its slot already exists on the VM (another run with RUN=$RUN?), pick another RUN" >&2
+  echo "$ME: RUN=$RUN is already in use on the VM (see above), maybe by another repo; pick another RUN, e.g. it-$RUN" >&2
   exit 2
 fi
 trap cleanup EXIT
