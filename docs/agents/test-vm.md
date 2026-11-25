@@ -6,7 +6,7 @@ A throwaway VM on the maintainer's LAN for running the tests and anything that n
 | --- | --- |
 | Host | `192.168.178.25` (only reachable from the maintainer's network) |
 | User | `root` |
-| OS | Debian 13 (trixie), Docker 29, Compose v5, 4 CPUs, 12 GB RAM minimum with ballooning (about 11 GB visible), no swap, 59 GB root disk |
+| OS | Debian 13 (trixie), Docker 29.10, Compose v5.8, 4 CPUs, 12 GB RAM minimum with ballooning (15.5 GB visible on 2026-11-25; the visible amount changes), no swap, 59 GB root disk (about 20 GB used) |
 | Private key | `~/.ssh/itop-mcp-test-vm` (on the maintainer's machine, **never commit it**) |
 | Host key | `~/.ssh/itop-mcp-test-vm.known_hosts` |
 
@@ -51,6 +51,32 @@ RUN names must be unique on the whole VM, across repos: the compose project name
 
 If the script was killed so hard that its clean-up could not run (or SSH was gone), clean up by hand as described in [Clean up](#clean-up) and remove the slot: `rm -f /var/lib/test-vm-slots/itop-mcp-server-$RUN.lease`.
 
+### Re-run after a settings change (cheap)
+
+`stack-on-vm.sh` always takes the stack down at the end, so a re-run through it starts from scratch (5 to 10 minutes). When you only changed a setting and want to see the checks again, keep the stack and restart just the service that reads the setting. This is by hand, so you take the slot and clean up yourself: start the stack like the script does, **under a RUN name of its own**, and take it down when you are done (see [Clean up](#clean-up)).
+
+```sh
+RUN=it-ti04; DIR=/root/itop-mcp-server-$RUN
+# once: copy (see "Copy the working tree over"), take a slot (lease file, see "Sharing the VM"), then
+$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN && sh make-certs.sh >/dev/null &&
+      docker compose -p $RUN up -d --build --quiet-pull"       # returns when the setup is complete
+# after each change: copy only the changed files, WITHOUT the rm -rf of the full copy (it would remove certs/)
+git diff --name-only HEAD | tar -T - -cf - | $SSH "tar -xf - -C $DIR"      # plus new files: git ls-files -o --exclude-standard
+$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN && docker compose -p $RUN restart librechat"
+$SSH "cd $DIR/test-stack && export TEST_TAG=$RUN && docker compose -p $RUN run --rm client python checks.py"
+```
+
+Which command picks up which change:
+
+| Changed | Command (as `docker compose -p $RUN ...`) |
+| --- | --- |
+| a file mounted into a service (`librechat/librechat.yaml`, `Caddyfile`, `nginx/*`): the content, not the compose file | `restart <service>` (`librechat`, `proxy`) |
+| `librechat/librechat.env`, a service's `environment:` or other compose settings | `up -d <service>` (recreates only that service) |
+| something a service is built from (`Dockerfile`, `src/`, `test-stack/client/`, `itop/`) | `up -d --build <service>` (`mcp`, `itop`), for the checks themselves `build client` |
+| the Keycloak realm, iTop's config or other things `client/setup.py` does once at the start | start from scratch (`stack-on-vm.sh`); the cheap re-run does not redo the setup |
+
+After a restart LibreChat needs a few seconds before it answers: wait for its log line `Server readiness checks passing` (`docker compose -p $RUN logs --tail 5 librechat`) before the checks. A restart of `proxy` or `mcp` is ready in about a second. The checks always run the whole list, about 5 minutes (a wait for LibreChat's login limit is part of that). Proven on the VM under RUN `it-ti04`: the start took 1 minute with cached images, a changed line in `librechat.yaml` plus `restart librechat` took under a second, and the checks passed (18 passed, 0 failed, 3 skipped).
+
 The sections below are the manual steps, for the smoke test and for debugging.
 
 ## Connect
@@ -92,7 +118,11 @@ git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - \
   | $SSH "rm -rf $DIR && mkdir $DIR && tar -xf - -C $DIR"
 ```
 
-The copy has no `.git` folder, so the one test that reads git attributes is skipped there.
+The copy has no `.git` folder (`stack-on-vm.sh` and `test-on-vm.sh` copy the same way). What does not work because of that:
+
+- Every `git` command in the VM folder fails (`not a git repository`): no `git status`, `diff` or `log` there. Do your git work on the dev machine and copy the result over.
+- The one test that reads git attributes (`tests/test_container_files.py`, the LF line endings check) is skipped on the VM, so a CRLF file does not show up there. Check it on the dev machine with `git ls-files --eol | grep -v w/lf` (see below).
+- Git-ignored files are not copied either: put nothing a run needs into `.env`, `compose.override.yaml`, `certs/`, `logs/` or `.venv/` (the stack makes its own certificates).
 
 `.gitattributes` gives every text file LF line endings, also on Windows with `core.autocrlf=true`, so the copy runs on Linux as-is. A checkout made before that rule existed keeps its CRLF files until they are written again; `git ls-files --eol | grep -v w/lf` lists them. To rewrite them, commit or stash your changes first, then run this in the checkout:
 
@@ -132,7 +162,18 @@ Remove only what you created yourself, and nothing else:
 $SSH "docker rmi itop-mcp-server:\$(sed -n 's/^__version__ = \"\(.*\)\"\$/\1/p' $DIR/src/itop_mcp_server/__init__.py)-$RUN; rm -rf $DIR"
 ```
 
-If a run was killed halfway, also take its containers and networks down first: `$SSH "docker compose -p $RUN down --volumes --remove-orphans"` (works from any folder, by project name alone), and `$SSH "docker rm -f $RUN-pytest"` for a pytest container.
+### A ticket stack killed halfway
+
+When `stack-on-vm.sh` or a by-hand run died without its clean-up (Ctrl-C that did not get through, lost SSH, killed shell), the stack of that run is still on the VM. Find it and take it down by its project name, which is the bare `$RUN`; nothing else is touched:
+
+```sh
+$SSH "docker ps -a --filter label=com.docker.compose.project=$RUN --format '{{.Names}} {{.Status}}'"   # what is left
+$SSH "docker compose -p $RUN down --volumes --remove-orphans --timeout 5"      # containers, network, volumes, from any folder
+$SSH "docker rmi \$(docker images --format '{{.Repository}}:{{.Tag}}' | grep ':$RUN\$')"   # the images tagged :$RUN (itop, mcp, client)
+$SSH "rm -rf /root/itop-mcp-server-$RUN /var/lib/test-vm-slots/itop-mcp-server-$RUN.lease"   # folder and VM slot
+```
+
+Check afterwards that the first command prints nothing. Use exactly your own `$RUN`: a prefix match would take down other runs. Without the folder, `docker compose -p $RUN down` still works; `docker compose config` (which the script uses to list the images) does not, hence the `docker images` lookup. A pytest container of a killed `test-on-vm.sh` run is `$SSH "docker rm -f $RUN-pytest"`.
 
 Keep the shared things in place, even if they look unused: the `python:3.13-slim` image, the `itop-mcp-server:<version>` tag, and other runs' images, containers, networks and folders. Never run `docker system prune`, `docker image prune -a`, `docker builder prune` or `docker rm -f $(docker ps -aq)`: they hit every run on the VM, not just yours.
 
