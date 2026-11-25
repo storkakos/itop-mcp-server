@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from checklib import Skip
 from common import CHAT, ITOP, MCP, browser, follow, form_data, page_text, say
 
 CALLBACK = f"{CHAT}/api/mcp/itop/oauth/callback"
@@ -131,6 +132,14 @@ def itop_keycloak_login(user: str, pwd: str) -> str:
     return hi.group(1)
 
 
+class _LoginLimited(Exception):
+    """LibreChat refused a login request with auth_rate_limited; wait is the seconds until its window ends."""
+
+    def __init__(self, wait: int):
+        super().__init__(f"auth_rate_limited, window ends in {wait} s")
+        self.wait = wait
+
+
 class LibreChat:
     """A LibreChat user in a browser."""
 
@@ -141,21 +150,44 @@ class LibreChat:
         self.pkce = None
         self.login_budget = None  # LibreChat's X-RateLimit-Remaining after the last login start
         self.waited = 0           # seconds waited for LibreChat's login limit
+        self._reset = None        # X-RateLimit-Reset of the last login start
+        self._kc_done = False     # this login got past Keycloak's password form
 
     def login(self) -> dict:
+        """Sign in with Keycloak. LibreChat's login limiter counts every request under /oauth/ per IP (start
+        and callback, two per login) against LOGIN_MAX per LOGIN_WINDOW minutes, a fixed window from the
+        first request; the test stack raises LOGIN_MAX (TEST_LIBRECHAT_LOGIN_MAX, see README). When LibreChat
+        still answers auth_rate_limited, this waits for the window to end and tries once more; refused again,
+        the check reports SKIP with the reason (checklib.Skip), never FAIL."""
         cfg = self.b.get(f"{CHAT}/api/config").json()
         assert cfg.get("openidLoginEnabled"), "no Sign in with Keycloak in LibreChat"
+        self._kc_done = False
+        try:
+            return self._login_once(retry=False)
+        except _LoginLimited as e:
+            self._wait(e.wait, "LibreChat answered auth_rate_limited")
+        try:
+            return self._login_once(retry=True)
+        except _LoginLimited:
+            raise Skip(f"LibreChat's login limit: auth_rate_limited again after waiting {self.waited} s for its "
+                       "window (raise TEST_LIBRECHAT_LOGIN_MAX, or restart librechat to reset it)") from None
+
+    def _login_once(self, retry: bool) -> dict:
         r = self._start_login()
         q = parse_qs(urlparse(r.headers.get("Location", "")).query)
-        self.pkce = q.get("code_challenge_method", [None])[0]
+        self.pkce = q.get("code_challenge_method", [None])[0] or self.pkce
         r = follow(self.b, r)
+        self._raise_if_limited(r)
         form = BeautifulSoup(r.text, "lxml").find("form", id="kc-form-login")
-        if form is None and r.url.startswith(CHAT):
+        if form is None and r.url.startswith(CHAT) and not (retry and self._kc_done):
             raise AssertionError(f"Keycloak logged in again without asking for a password: {r.url}")
-        if form is None and "auth_rate_limited" in r.url + r.text:
-            raise AssertionError("LibreChat's login rate limit (about 7 logins per 5 minutes), wait five minutes")
-        assert form is not None, f"no Keycloak login form: {r.status_code} {r.url}"
-        r = _keycloak_login(self.b, r, self.user, self.pwd)
+        if form is not None:
+            r = _keycloak_login(self.b, r, self.user, self.pwd)
+            # The password was accepted; a retry after a refused callback finds Keycloak's session.
+            self._kc_done = True
+            self._raise_if_limited(r)
+        elif not r.url.startswith(CHAT):
+            raise AssertionError(f"no Keycloak login form: {r.status_code} {r.url}")
         if "error=" in getattr(r, "url", ""):
             raise AssertionError(f"LibreChat login failed: {r.url}")
         tok = self.b.post(f"{CHAT}/api/auth/refresh")
@@ -165,21 +197,39 @@ class LibreChat:
         return tok.json()["user"]
 
     def _start_login(self):
-        """Sign in with Keycloak. LibreChat's login limiter counts every request under /oauth/ per IP (start
-        and callback, two per login; LOGIN_MAX 7 per LOGIN_WINDOW 5 minutes, fixed from the first request).
-        If this start used up the budget, the callback would be refused with auth_rate_limited: wait for the
-        window to end and start again, instead of failing."""
+        """The first request of the login. If it used up the budget, the callback would be refused with
+        auth_rate_limited: wait for the window to end and start again, instead of failing."""
         r = self.b.get(f"{CHAT}/oauth/openid", allow_redirects=False)
-        left, reset = r.headers.get("X-RateLimit-Remaining"), r.headers.get("X-RateLimit-Reset")
+        left, self._reset = r.headers.get("X-RateLimit-Remaining"), r.headers.get("X-RateLimit-Reset")
         self.login_budget = left
-        if left is not None and int(left) < 1 and reset:
-            wait = max(0, int(float(reset) - time.time())) + 2
-            print(f"   LibreChat login limit reached, waiting {wait} s for its window", flush=True)
-            time.sleep(wait)
-            self.waited = wait
+        if left is not None and int(left) < 1 and self._reset:
+            self._wait(self._until_reset(), "LibreChat login limit reached")
             r = self.b.get(f"{CHAT}/oauth/openid", allow_redirects=False)
+            self._reset = r.headers.get("X-RateLimit-Reset")
             self.login_budget = r.headers.get("X-RateLimit-Remaining")
         return r
+
+    def _until_reset(self) -> int:
+        """Seconds until LibreChat's login window ends: from X-RateLimit-Reset (epoch seconds) of the last
+        login start, else a whole window (LIBRECHAT_LOGIN_WINDOW minutes, LibreChat's default 5)."""
+        if self._reset:
+            return max(0, int(float(self._reset) - time.time())) + 2
+        return int(os.environ.get("LIBRECHAT_LOGIN_WINDOW", "5")) * 60 + 2
+
+    def _wait(self, seconds: int, why: str) -> None:
+        print(f"   {why}, waiting {seconds} s for its window", flush=True)
+        time.sleep(seconds)
+        self.waited += seconds
+
+    def _raise_if_limited(self, r) -> None:
+        """LibreChat refuses a request under /oauth/ over the limit with 429 or a redirect to
+        /login?error=auth_rate_limited."""
+        if isinstance(r, str):
+            limited = "auth_rate_limited" in r
+        else:
+            limited = r.status_code == 429 or "auth_rate_limited" in r.url + r.text[:5000]
+        if limited:
+            raise _LoginLimited(self._until_reset())
 
     def config(self) -> dict:
         return self.b.get(f"{CHAT}/api/config", headers=self.h).json()

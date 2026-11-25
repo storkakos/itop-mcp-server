@@ -7,7 +7,7 @@ import time
 import requests
 
 import flows
-from checklib import Group
+from checklib import Group, Skip
 from common import CHAT, KC_USERS, REALM, SSO
 
 # Seconds to wait for LibreChat before the first check of this group (it boots after the setup).
@@ -46,14 +46,28 @@ anna, bob = KC_USERS
 
 
 chats = {}
+skipped = {}  # user -> why their LibreChat login was skipped (LibreChat's login limit)
 
 
 def _librechat(user):
     lc = flows.LibreChat(user[0], user[1])
-    me = lc.login()
+    try:
+        me = lc.login()
+    except Skip as e:
+        skipped[user[0]] = str(e)
+        raise
     assert me.get("email") == user[4], me
     chats[user[0]] = lc
-    return f"{me.get('name')} <{me.get('email')}>, PKCE {lc.pkce}, LibreChat login requests left {lc.login_budget}"
+    return (f"{me.get('name')} <{me.get('email')}>, PKCE {lc.pkce}, LibreChat login requests left {lc.login_budget}"
+            + (f", waited {lc.waited} s for LibreChat's login limit" if lc.waited else ""))
+
+
+def _chat(user):
+    """The LibreChat session of an earlier check. If that login was skipped because of LibreChat's login
+    limit, this check is skipped too (with the same reason) instead of failing for lack of a session."""
+    if user[0] in skipped:
+        raise Skip(f"needs {user[0]}'s LibreChat login, skipped: {skipped[user[0]]}")
+    return chats[user[0]]
 
 
 @check("example 5: a Keycloak user logs into LibreChat")
@@ -63,7 +77,7 @@ def _():
 
 @check("example 6: connecting the itop server opens the iTop consent page")
 def _():
-    s = chats[anna[0]].connect_itop()
+    s = _chat(anna).connect_itop()
     if s["consent"]:
         assert "LibreChat MCP Client" in s["consent"] and "iTop assistant" in s["consent"], s["consent"][:300]
     return "connected" + ("" if s["consent"] else " (already authorized earlier)")
@@ -71,7 +85,7 @@ def _():
 
 @check("example option: iTop assistant preselected for new chats")
 def _():
-    specs = chats[anna[0]].config()["modelSpecs"]
+    specs = _chat(anna).config()["modelSpecs"]
     spec = next(x for x in specs["list"] if x["name"] == "itop-assistant")
     assert specs.get("prioritize") is True and spec.get("default") is True and spec.get("mcpServers") == ["itop"], specs
     return "default spec itop-assistant with the itop server"
@@ -80,7 +94,7 @@ def _():
 def _whoami_chat(user):
     if not flows.llm_key_present():
         return "SKIP no shared LLM key (/root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
-    lc = chats[user[0]]
+    lc = _chat(user)
     spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == "itop-assistant")
     calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
     outputs = " ".join(str(c.get("output")) for c in calls if "whoami" in (c.get("name") or ""))
@@ -96,14 +110,14 @@ def _():
 @check("example 7: a second user gets their own name")
 def _():
     _librechat(bob)
-    chats[bob[0]].connect_itop()
+    _chat(bob).connect_itop()
     return _whoami_chat(bob)
 
 @check("example 8: after a LibreChat logout Keycloak asks for a password, and another user logs in")
 def _():
     # bob's login follows anna's and his own (check 7). LibreChat counts two requests under /oauth/ per login
-    # against its limit of 7 per 5 minutes; if the budget is used up, LibreChat.login waits for the window.
-    lc = chats[bob[0]]
+    # against LOGIN_MAX (raised in the test stack); if the budget is used up, LibreChat.login waits for the window.
+    lc = _chat(bob)
     out = lc.logout()
     assert out["end_session"] == f"{SSO}/realms/{REALM}/protocol/openid-connect/logout", out
     assert out["landed"].startswith(f"{CHAT}/login"), f"after the logout the browser landed on {out['landed']}"
