@@ -342,7 +342,7 @@ assistant to the people meant for it:
 | `max_grant_days` | 90 days | Every connection ends 90 days after it was made, even if used daily. The user then logs in and consents again. This bounds how long a connection outlives an offboarding that misses the iTop user. |
 
 Users see their connections under *My Account* → *Personal Tokens* → *Connected applications* and
-can end them there. Administrators see all of them under *Admin tools* → *OAuth connections*.
+can end them there. Administrators see all of them under *Administration* → *OAuth connections*.
 
 ## Web server rewrites
 
@@ -577,7 +577,7 @@ assistant's tools work.
 | "Unknown application" on the iTop page | Same as above, or the client registered more than 24 hours ago without completing a connection; connect again. |
 | After the login you land on iTop's home page instead of the consent page | PHP does not see the public URL behind the reverse proxy. See [PHP behind a reverse proxy](#php-behind-a-reverse-proxy), then connect again. |
 | "Personal tokens not allowed" | The user's profiles are not in `personal_tokens_allowed_profiles`. |
-| The consent page says **"Not available for your account"** – "Your profiles do not give access to what this application asks for" | The iTop user who is logged in has none of the `required_profiles` (and usually is not in `personal_tokens_allowed_profiles` either). This is by design for `Administrator`, see [Profiles](#profiles-who-may-use-the-assistant). To grant access, an administrator gives the user one of the profiles listed in both settings (*Admin tools* → *User accounts* → the user → *Profiles*); the user then connects again. An administrator who needs the assistant uses a second, non-admin account. |
+| The consent page says **"Not available for your account"** – "Your profiles do not give access to what this application asks for" | The iTop user who is logged in has none of the `required_profiles` (and usually is not in `personal_tokens_allowed_profiles` either). This is by design for `Administrator`, see [Profiles](#profiles-who-may-use-the-assistant). To grant access, an administrator gives the user one of the profiles listed in both settings (*Administration* → *User management* → *User accounts* → the user → *Profiles*); the user then connects again. An administrator who needs the assistant uses a second, non-admin account. |
 | "Not available for your account" although the intended user has the right profiles | The consent page uses whatever iTop session the browser already has. If the browser is still logged into iTop as someone else (for example the administrator), the consent page is shown to that person, not to the user who started the connection. Log out of iTop, or use a private browser window, or log into iTop as the intended user first; then connect again. |
 | Login and consent work, but the client never shows "Connected" and keeps asking to connect; `docker logs` shows `Token abgelehnt` | `token` is missing from `allowed_login_types`, or `allow_rest_services_via_tokens` is not `true`. The server checks every request's token with a REST call, so every request gets `401`. |
 | Connected, but tool calls fail with `421 Misdirected Request` | The reverse proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. |
