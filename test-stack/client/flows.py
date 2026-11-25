@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from checklib import Skip
 from common import CHAT, ITOP, MCP, browser, follow, form_data, page_text, say
 
 CALLBACK = f"{CHAT}/api/mcp/itop/oauth/callback"
@@ -64,15 +65,15 @@ def consent(b, r):
     return follow(b, b.post(urljoin(r.url, form.get("action") or r.url), data=d, allow_redirects=False), CALLBACK)
 
 
-def mcp_call(token: str, tool: str) -> str:
+def mcp_call(token: str, tool: str, url: str = MCP) -> str:
     c = requests.Session()
     h = {"Authorization": f"Bearer {token}", "Accept": "application/json, text/event-stream"}
-    r = c.post(MCP, headers=h, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+    r = c.post(url, headers=h, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test-stack", "version": "1"}}})
     r.raise_for_status()
     if r.headers.get("mcp-session-id"):
         h["mcp-session-id"] = r.headers["mcp-session-id"]
-    r = c.post(MCP, headers=h, json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+    r = c.post(url, headers=h, json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                                       "params": {"name": tool, "arguments": {}}})
     m = re.search(r"data: (.*)", r.text)
     body = json.loads(m.group(1)) if m else r.json()
@@ -81,6 +82,11 @@ def mcp_call(token: str, tool: str) -> str:
 
 def mcp_oauth_flow(login: str, user: str, pwd: str) -> str:
     """An MCP client like LibreChat: discovery, registration, login, consent, token, whoami. Returns whoami."""
+    return mcp_call(mcp_token(login, user, pwd), "whoami")
+
+
+def mcp_token(login: str, user: str, pwd: str) -> str:
+    """The OAuth part of mcp_oauth_flow: returns the access token for the MCP server."""
     c = requests.Session()
     r = c.post(MCP, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
                headers={"Accept": "application/json, text/event-stream"})
@@ -112,7 +118,7 @@ def mcp_oauth_flow(login: str, user: str, pwd: str) -> str:
         "grant_type": "authorization_code", "code": q["code"][0], "redirect_uri": CALLBACK,
         "client_id": client_id, "code_verifier": verifier, "resource": prm["resource"]})
     assert tok.status_code == 200, tok.text[:200]
-    return mcp_call(tok.json()["access_token"], "whoami")
+    return tok.json()["access_token"]
 
 
 def itop_keycloak_login(user: str, pwd: str) -> str:
@@ -126,6 +132,14 @@ def itop_keycloak_login(user: str, pwd: str) -> str:
     return hi.group(1)
 
 
+class _LoginLimited(Exception):
+    """LibreChat refused a login request with auth_rate_limited; wait is the seconds until its window ends."""
+
+    def __init__(self, wait: int):
+        super().__init__(f"auth_rate_limited, window ends in {wait} s")
+        self.wait = wait
+
+
 class LibreChat:
     """A LibreChat user in a browser."""
 
@@ -133,15 +147,47 @@ class LibreChat:
         self.b = browser()
         self.user, self.pwd = user, pwd
         self.h: dict = {}
+        self.pkce = None
+        self.login_budget = None  # LibreChat's X-RateLimit-Remaining after the last login start
+        self.waited = 0           # seconds waited for LibreChat's login limit
+        self._reset = None        # X-RateLimit-Reset of the last login start
+        self._kc_done = False     # this login got past Keycloak's password form
 
     def login(self) -> dict:
+        """Sign in with Keycloak. LibreChat's login limiter counts every request under /oauth/ per IP (start
+        and callback, two per login) against LOGIN_MAX per LOGIN_WINDOW minutes, a fixed window from the
+        first request; the test stack raises LOGIN_MAX (TEST_LIBRECHAT_LOGIN_MAX, see README). When LibreChat
+        still answers auth_rate_limited, this waits for the window to end and tries once more; refused again,
+        the check reports SKIP with the reason (checklib.Skip), never FAIL."""
         cfg = self.b.get(f"{CHAT}/api/config").json()
         assert cfg.get("openidLoginEnabled"), "no Sign in with Keycloak in LibreChat"
-        r = self.b.get(f"{CHAT}/oauth/openid", allow_redirects=False)
+        self._kc_done = False
+        try:
+            return self._login_once(retry=False)
+        except _LoginLimited as e:
+            self._wait(e.wait, "LibreChat answered auth_rate_limited")
+        try:
+            return self._login_once(retry=True)
+        except _LoginLimited:
+            raise Skip(f"LibreChat's login limit: auth_rate_limited again after waiting {self.waited} s for its "
+                       "window (raise TEST_LIBRECHAT_LOGIN_MAX, or restart librechat to reset it)") from None
+
+    def _login_once(self, retry: bool) -> dict:
+        r = self._start_login()
         q = parse_qs(urlparse(r.headers.get("Location", "")).query)
-        self.pkce = q.get("code_challenge_method", [None])[0]
+        self.pkce = q.get("code_challenge_method", [None])[0] or self.pkce
         r = follow(self.b, r)
-        r = _keycloak_login(self.b, r, self.user, self.pwd)
+        self._raise_if_limited(r)
+        form = BeautifulSoup(r.text, "lxml").find("form", id="kc-form-login")
+        if form is None and r.url.startswith(CHAT) and not (retry and self._kc_done):
+            raise AssertionError(f"Keycloak logged in again without asking for a password: {r.url}")
+        if form is not None:
+            r = _keycloak_login(self.b, r, self.user, self.pwd)
+            # The password was accepted; a retry after a refused callback finds Keycloak's session.
+            self._kc_done = True
+            self._raise_if_limited(r)
+        elif not r.url.startswith(CHAT):
+            raise AssertionError(f"no Keycloak login form: {r.status_code} {r.url}")
         if "error=" in getattr(r, "url", ""):
             raise AssertionError(f"LibreChat login failed: {r.url}")
         tok = self.b.post(f"{CHAT}/api/auth/refresh")
@@ -150,8 +196,73 @@ class LibreChat:
         self.h = {"Authorization": "Bearer " + tok.json()["token"]}
         return tok.json()["user"]
 
+    def _start_login(self):
+        """The first request of the login. If it used up the budget, the callback would be refused with
+        auth_rate_limited: wait for the window to end and start again, instead of failing."""
+        r = self.b.get(f"{CHAT}/oauth/openid", allow_redirects=False)
+        left, self._reset = r.headers.get("X-RateLimit-Remaining"), r.headers.get("X-RateLimit-Reset")
+        self.login_budget = left
+        if left is not None and int(left) < 1 and self._reset:
+            self._wait(self._until_reset(), "LibreChat login limit reached")
+            r = self.b.get(f"{CHAT}/oauth/openid", allow_redirects=False)
+            self._reset = r.headers.get("X-RateLimit-Reset")
+            self.login_budget = r.headers.get("X-RateLimit-Remaining")
+        return r
+
+    def _until_reset(self) -> int:
+        """Seconds until LibreChat's login window ends: from X-RateLimit-Reset (epoch seconds) of the last
+        login start, else a whole window (LIBRECHAT_LOGIN_WINDOW minutes, LibreChat's default 5)."""
+        if self._reset:
+            return max(0, int(float(self._reset) - time.time())) + 2
+        return int(os.environ.get("LIBRECHAT_LOGIN_WINDOW", "5")) * 60 + 2
+
+    def _wait(self, seconds: int, why: str) -> None:
+        print(f"   {why}, waiting {seconds} s for its window", flush=True)
+        time.sleep(seconds)
+        self.waited += seconds
+
+    def _raise_if_limited(self, r) -> None:
+        """LibreChat refuses a request under /oauth/ over the limit with 429 or a redirect to
+        /login?error=auth_rate_limited."""
+        if isinstance(r, str):
+            limited = "auth_rate_limited" in r
+        else:
+            limited = r.status_code == 429 or "auth_rate_limited" in r.url + r.text[:5000]
+        if limited:
+            raise _LoginLimited(self._until_reset())
+
     def config(self) -> dict:
         return self.b.get(f"{CHAT}/api/config", headers=self.h).json()
+
+    def logout(self) -> dict:
+        """The Log out menu item: LibreChat ends its session and sends the browser to Keycloak's end-session
+        endpoint (OPENID_USE_END_SESSION_ENDPOINT), which ends the Keycloak session and redirects to
+        OPENID_POST_LOGOUT_REDIRECT_URI. Returns the end-session URL, whether Keycloak asked "Do you want
+        to log out?" and where the browser landed."""
+        r = self.b.post(f"{CHAT}/api/auth/logout", headers=self.h)
+        assert r.status_code == 200, f"LibreChat logout {r.status_code} {r.text[:200]}"
+        redirect = r.json().get("redirect")
+        assert redirect, f"LibreChat did not send the browser to Keycloak (OPENID_USE_END_SESSION_ENDPOINT?): {r.json()}"
+        self.h = {}
+        r = follow(self.b, self.b.get(redirect, allow_redirects=False))
+        confirm = BeautifulSoup(r.text, "lxml").find("input", attrs={"name": "confirmLogout"})
+        if confirm is not None:  # no id_token_hint: Keycloak asks "Do you want to log out?"
+            form = confirm.find_parent("form")
+            d = form_data(form)
+            d["confirmLogout"] = "Logout"
+            r = follow(self.b, self.b.post(urljoin(r.url, form.get("action") or r.url), data=d, allow_redirects=False))
+        # Front-channel logout: Keycloak shows a page that loads each client's logout URL in an iframe (for
+        # iTop: pages/logoff.php, with iTop's cookie), then continues to the post-logout redirect URI.
+        soup = BeautifulSoup(r.text, "lxml")
+        frames = [urljoin(r.url, f["src"]) for f in soup.find_all("iframe") if f.get("src")]
+        for src in frames:
+            follow(self.b, self.b.get(src, allow_redirects=False))
+        cont = soup.find("a", id="continue")
+        if frames and cont is not None and cont.get("href"):
+            r = follow(self.b, self.b.get(urljoin(r.url, cont["href"]), allow_redirects=False))
+        assert "Invalid redirect uri" not in r.text,             "Keycloak: Invalid redirect uri (post logout redirect URI missing on the librechat client)"
+        return {"end_session": redirect.split("?")[0], "confirmed": confirm is not None, "landed": r.url,
+                "frontchannel": [urlparse(f).netloc + urlparse(f).path for f in frames]}
 
     def connect_itop(self) -> dict:
         r = self.b.post(f"{CHAT}/api/mcp/itop/reinitialize", headers=self.h, json={})
@@ -164,7 +275,11 @@ class LibreChat:
             consent_text = page_text(r.text, 3000)
             cb = consent(self.b, r)
             assert isinstance(cb, str)
-            self.b.get(cb)  # the browser opens LibreChat's callback
+            # The browser opens LibreChat's callback; LibreChat exchanges the code there. Its redirect to the
+            # page under /oauth/ that says "connected" is not followed: LibreChat's login limiter counts every
+            # request under /oauth/, and the logins of the checks need that budget.
+            done = self.b.get(cb, allow_redirects=False)
+            assert done.status_code < 400 and "error" not in done.headers.get("Location", ""),                 f"LibreChat's MCP callback: {done.status_code} {done.headers.get('Location')}"
         for _ in range(15):
             st = self.b.get(f"{CHAT}/api/mcp/connection/status", headers=self.h).json()
             s = st.get("connectionStatus", {}).get("itop", {})
@@ -206,5 +321,5 @@ class LibreChat:
 
 
 def llm_key_present() -> bool:
-    """An LLM key from llm.env (any *_KEY). GPG_KEY is set by the Python base image, not by llm.env."""
-    return any(v for k, v in os.environ.items() if k.endswith("_KEY") and k != "GPG_KEY")
+    """The shared LiteLLM key (LITELLM_KEY from llm.env or LLM_ENV_FILE)."""
+    return bool(os.environ.get("LITELLM_KEY"))

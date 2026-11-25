@@ -57,6 +57,10 @@ manual and in the config snippets.
 | itop-attribute-encrypted-password (only with an identity provider; ships with iTop 3.2.3) | 1.1.1 | 2026-11-23 |
 
 The validation run used Apache 2.4 with mod_php 8.3 behind a TLS-terminating reverse proxy.
+The [nginx](#nginx) rules and the nginx part of [PHP behind a reverse proxy](#php-behind-a-reverse-proxy)
+were tested by hand on 2026-11-24 with nginx 1.28 and PHP-FPM 8.3 behind the same proxy: the
+discovery URLs, the private extension files and an OAuth run with the iTop login form up to the
+consent page.
 
 Newer versions should work but are untested.
 
@@ -225,7 +229,7 @@ iTop with that user's token. Two settings decide who gets such a token:
 | Setting | Decides | Applies to |
 |---|---|---|
 | `authent-token` → `personal_tokens_allowed_profiles` | Who may own **any** personal token in iTop: tokens made by hand under *My Account* and tokens issued through OAuth for any resource | Personal tokens in general |
-| `altioo-oauth-server` → `resources` → `itop-mcp` → `required_profiles` | Who may connect **this resource** (the MCP server) through OAuth. Anyone else is refused before the consent page. | The MCP server only |
+| `altioo-oauth-server` → `resources` → `itop-mcp` → `required_profiles` | Who may connect **this resource** (the MCP server) through OAuth. Anyone else gets the consent page with "Not available for your account" and cannot connect. | The MCP server only |
 
 Set both to the profiles that should use the assistant, for example `Service Desk Agent` and
 `Support Agent`. Use the profile names exactly as they appear in your iTop.
@@ -338,7 +342,7 @@ assistant to the people meant for it:
 | `max_grant_days` | 90 days | Every connection ends 90 days after it was made, even if used daily. The user then logs in and consents again. This bounds how long a connection outlives an offboarding that misses the iTop user. |
 
 Users see their connections under *My Account* → *Personal Tokens* → *Connected applications* and
-can end them there. Administrators see all of them under *Admin tools* → *OAuth connections*.
+can end them there. Administrators see all of them under *Administration* → *OAuth connections*.
 
 ## Web server rewrites
 
@@ -366,24 +370,23 @@ The extension's own `.htaccess` needs `AllowOverride All` for its directory. It 
 
 ### nginx
 
-nginx ignores the extension's `.htaccess`, so add both the rewrite and the deny rule to the iTop
-`server` block:
+nginx ignores the extension's `.htaccess`, so add both the rewrites and the deny rule to the iTop
+`server` block (tested with nginx 1.28 and PHP-FPM 8.3, see [Tested with](#tested-with)):
 
 ```nginx
 # Authorization server metadata (RFC 8414) and its OpenID Connect twin, at the site root
 location ~ ^/\.well-known/(oauth-authorization-server|openid-configuration)/env-production/altioo-oauth-server$ {
-	rewrite ^ /env-production/altioo-oauth-server/index.php?route=$1 last;
-}
-
-# The same metadata inside the issuer path
-location ~ ^/env-production/altioo-oauth-server/\.well-known/(oauth-authorization-server|openid-configuration)$ {
-	rewrite ^ /env-production/altioo-oauth-server/index.php?route=$1 last;
+	rewrite ^/\.well-known/([^/]+)/ /env-production/altioo-oauth-server/index.php?route=$1 last;
 }
 
 # Everything else in the extension's directory except index.php is private
 location ^~ /env-production/altioo-oauth-server/ {
+	# The same metadata inside the issuer path
+	location ~ ^/env-production/altioo-oauth-server/\.well-known/(oauth-authorization-server|openid-configuration)$ {
+		rewrite ^/env-production/altioo-oauth-server/\.well-known/(.+)$ /env-production/altioo-oauth-server/index.php?route=$1 last;
+	}
 	location = /env-production/altioo-oauth-server/index.php {
-		# same PHP handling as the rest of iTop, e.g.:
+		# same PHP handling as the rest of iTop, including "PHP behind a reverse proxy", e.g.:
 		include fastcgi_params;
 		fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
 		fastcgi_pass php-fpm;
@@ -392,7 +395,12 @@ location ^~ /env-production/altioo-oauth-server/ {
 }
 ```
 
-Adjust `fastcgi_pass` to your PHP-FPM upstream.
+Adjust `fastcgi_pass` to your PHP-FPM upstream. Two details matter:
+
+- Each `rewrite` carries its own regex with the capture. A bare `rewrite ^ ...$1` resets the
+  captures of the `location`, so the route is empty and the extension answers "unknown endpoint".
+- The rule for the issuer path sits **inside** the `^~` block. The `^~` prefix stops nginx from
+  checking regex locations outside it, so a rule next to the block is never reached.
 
 ### PHP behind a reverse proxy
 
@@ -423,9 +431,11 @@ SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on
 not enough. Only use `SetEnvIf` on `X-Forwarded-Proto` when the web server is reachable through the
 proxy only.
 
-**nginx** (not tested), in the `location` that passes PHP to PHP-FPM:
+**nginx** (tested), in every `location` that passes PHP to PHP-FPM, including the one for the
+extension's `index.php` in [nginx](#nginx), after `include fastcgi_params;`:
 
 ```nginx
+# Public scheme, host and port, as clients see them
 fastcgi_param HTTPS on;
 fastcgi_param REQUEST_SCHEME https;
 fastcgi_param SERVER_PORT 443;
@@ -483,6 +493,7 @@ curl -s https://itop.example.com/.well-known/oauth-authorization-server/env-prod
 | 404 also for `https://itop.example.com/env-production/altioo-oauth-server/.well-known/openid-configuration` | The extension is not installed: run the setup wizard again and tick it. |
 | 403 | `AllowOverride` is off for the extension's directory (Apache), or the deny rule is too broad (nginx). |
 | iTop login page or HTML | The rewrite points to the wrong path. |
+| 404 with "unknown endpoint" (nginx) | The `rewrite` lost its capture, so the route is empty. Use the rules from [nginx](#nginx) as they are. |
 | `issuer` with `http://` or another host | iTop's `app_root_url` in `config-itop.php` does not match the public URL. Set it to `https://itop.example.com/`. |
 
 ### 2. The MCP server answers 401 and points to its metadata
@@ -566,7 +577,8 @@ assistant's tools work.
 | "Unknown application" on the iTop page | Same as above, or the client registered more than 24 hours ago without completing a connection; connect again. |
 | After the login you land on iTop's home page instead of the consent page | PHP does not see the public URL behind the reverse proxy. See [PHP behind a reverse proxy](#php-behind-a-reverse-proxy), then connect again. |
 | "Personal tokens not allowed" | The user's profiles are not in `personal_tokens_allowed_profiles`. |
-| The user is refused before the consent page | The user has none of the `required_profiles`. |
+| The consent page says **"Not available for your account"** – "Your profiles do not give access to what this application asks for" | The iTop user who is logged in has none of the `required_profiles` (and usually is not in `personal_tokens_allowed_profiles` either). This is by design for `Administrator`, see [Profiles](#profiles-who-may-use-the-assistant). To grant access, an administrator gives the user one of the profiles listed in both settings (*Administration* → *User management* → *User accounts* → the user → *Profiles*); the user then connects again. An administrator who needs the assistant uses a second, non-admin account. |
+| "Not available for your account" although the intended user has the right profiles | The consent page uses whatever iTop session the browser already has. If the browser is still logged into iTop as someone else (for example the administrator), the consent page is shown to that person, not to the user who started the connection. Log out of iTop, or use a private browser window, or log into iTop as the intended user first; then connect again. |
 | Login and consent work, but the client never shows "Connected" and keeps asking to connect; `docker logs` shows `Token abgelehnt` | `token` is missing from `allowed_login_types`, or `allow_rest_services_via_tokens` is not `true`. The server checks every request's token with a REST call, so every request gets `401`. |
 | Connected, but tool calls fail with `421 Misdirected Request` | The reverse proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. |
 | "Unknown resource" | See check 4. |

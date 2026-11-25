@@ -1,7 +1,8 @@
 """TEST ONLY. Shared values and helpers of the test stack. Every password and secret here is a test value."""
+import os
 import re
 import time
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,7 +10,24 @@ from bs4 import BeautifulSoup
 ITOP = "https://itop.example.com"
 SSO = "https://sso.example.com"
 CHAT = "https://chat.example.com"
+# The MCP server's public URL (its MCP_RESOURCE_URL). The only place the test client names it: checks,
+# flows and config edits all use these values, so the check list runs unchanged against another
+# hostname or path once the stack (compose.yaml, Caddyfile, librechat.yaml, certificate) matches.
 MCP = "https://mcp.example.com/mcp"
+# The same server under a path prefix, behind the README's nginx block for that case. Set only by the
+# nginx variant (compose.nginx.yaml); without it the path-prefix check is skipped.
+MCP_PREFIX = os.environ.get("TEST_MCP_PREFIX_URL", "")
+
+
+def metadata_url(resource: str) -> str:
+    """Protected resource metadata (RFC 9728): the well-known path goes between origin and the URL's path."""
+    u = urlparse(resource)
+    return f"{u.scheme}://{u.netloc}/.well-known/oauth-protected-resource{u.path}"
+
+
+MCP_METADATA = metadata_url(MCP)
+# The authorization server the MCP server names: the OAuth extension in iTop.
+ISSUER = f"{ITOP}/env-production/altioo-oauth-server"
 REALM = "example"
 CONFIG = "/var/www/itop/conf/production/config-itop.php"
 

@@ -3,14 +3,43 @@
 Same values as the admin-console tables in docs/setup/example-keycloak-librechat.md. Differences for
 the local test, each on purpose: the realm itself (the manual assumes it exists) with Mailpit as SMTP;
 fixed client secrets (test values) instead of copying them from the Credentials tab.
+
+The clients are merged, not replaced: a client that exists already keeps every setting this setup does
+not own (attributes, other redirect and post-logout redirect URIs, web origins), so another stack's
+setup or an admin's change on the same Keycloak survives a second run.
 """
 from common import CHAT, ITOP, KC_SECRET_ITOP, KC_SECRET_LIBRECHAT, KC_USERS, REALM, SSO, kc_admin, say
+
+
+# Keycloak keeps the post-logout redirect URIs in one attribute, separated by "##".
+LIST_ATTRIBUTES = {"post.logout.redirect.uris"}
 
 
 def _ok(r):
     if r.status_code >= 400:
         raise SystemExit(f"{r.request.method} {r.url}: {r.status_code} {r.text[:300]}")
     return r
+
+
+def _union(old: list, new: list) -> list:
+    return [*old, *(x for x in new if x not in old)]
+
+
+def merge_client(current: dict, own: dict) -> dict:
+    """The existing client representation with this setup's settings put on top: own scalar fields and
+    attributes win, URI lists are joined, anything else stays as it is."""
+    merged = {**current, **{k: v for k, v in own.items() if k not in ("attributes", "redirectUris", "webOrigins")}}
+    merged["redirectUris"] = _union(current.get("redirectUris") or [], own.get("redirectUris") or [])
+    merged["webOrigins"] = _union(current.get("webOrigins") or [], own.get("webOrigins") or [])
+    attrs = dict(current.get("attributes") or {})
+    for k, v in (own.get("attributes") or {}).items():
+        if k in LIST_ATTRIBUTES:
+            attrs[k] = "##".join(_union([x for x in attrs.get(k, "").split("##") if x],
+                                        [x for x in v.split("##") if x]))
+        else:
+            attrs[k] = v
+    merged["attributes"] = attrs
+    return merged
 
 
 def setup_realm() -> None:
@@ -21,8 +50,10 @@ def setup_realm() -> None:
                             "smtpServer": {"host": "mail", "port": "1025", "from": "keycloak@example.com"}}))
     R = f"{A}/{REALM}"
 
-    def client(cid, name, root, redirect, secret):
+    def client(cid, name, root, redirect, post_logout, secret, frontchannel_logout_url=""):
         body = {
+            # Front-channel logout: on a Keycloak logout the browser loads this URL in an iframe.
+            "frontchannelLogout": bool(frontchannel_logout_url),
             "clientId": cid, "name": name, "protocol": "openid-connect", "enabled": True,
             "publicClient": False, "clientAuthenticatorType": "client-secret", "secret": secret,
             "authorizationServicesEnabled": False, "standardFlowEnabled": True,
@@ -30,18 +61,26 @@ def setup_realm() -> None:
             "attributes": {"standard.token.exchange.enabled": "false",
                            "oauth2.device.authorization.grant.enabled": "false",
                            "oidc.ciba.grant.enabled": "false", "pkce.code.challenge.method": "",
-                           "post.logout.redirect.uris": ""},
+                           "post.logout.redirect.uris": post_logout},
             "rootUrl": root, "baseUrl": root + "/", "redirectUris": [redirect], "webOrigins": [],
         }
+        if frontchannel_logout_url:
+            body["attributes"]["frontchannel.logout.url"] = frontchannel_logout_url
         found = s.get(f"{R}/clients", params={"clientId": cid}).json()
         if found:
-            _ok(s.put(f"{R}/clients/{found[0]['id']}", json=body))
+            current = _ok(s.get(f"{R}/clients/{found[0]['id']}")).json()
+            _ok(s.put(f"{R}/clients/{found[0]['id']}", json=merge_client(current, body)))
         else:
             _ok(s.post(f"{R}/clients", json=body))
         say("   keycloak client", cid)
 
-    client("itop", "iTop", ITOP, f"{ITOP}/env-production/combodo-hybridauth/landing.php", KC_SECRET_ITOP)
-    client("librechat", "LibreChat", CHAT, f"{CHAT}/oauth/openid/callback", KC_SECRET_LIBRECHAT)
+    # Front-channel logout to iTop's logoff page: a Keycloak logout (e.g. LibreChat's Log out) ends the
+    # iTop session in the browser too, so the next user does not consent as the previous one.
+    client("itop", "iTop", ITOP, f"{ITOP}/env-production/combodo-hybridauth/landing.php", "", KC_SECRET_ITOP,
+           f"{ITOP}/pages/logoff.php")
+    # LibreChat's OpenID login callback and its login page after logout (OPENID_POST_LOGOUT_REDIRECT_URI).
+    # Without the latter, Keycloak answers LibreChat's logout with "Invalid redirect uri" and keeps the session.
+    client("librechat", "LibreChat", CHAT, f"{CHAT}/oauth/openid/callback", f"{CHAT}/login", KC_SECRET_LIBRECHAT)
 
     # "Lock down the email in the realm"
     up = _ok(s.get(f"{R}/users/profile")).json()

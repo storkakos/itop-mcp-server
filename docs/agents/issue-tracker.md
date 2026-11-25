@@ -27,6 +27,30 @@ ls "$MAIN/.scratch/"
 
 From a worktree, change nothing in the main checkout except your own ticket file: claim it, tick its acceptance criteria, resolve it and append comments. Do not edit other tickets, specs or maps, do not touch the main checkout's working tree or branch, and do not commit there. All code and doc changes go into your worktree's branch.
 
+## Working on a ticket next to other agents
+
+- Before you resolve a ticket, rebase your branch onto the current target branch. If the rebase brought in changes to files you touched, run the affected tests or checks on the test VM again and note that second run in the ticket.
+- A ticket never asks you to change a ticket or file of another repo. If something has to be handed over to another repo, write it in your own ticket under a heading `## Handover to <repo> <NN>`. The orchestrator carries it over when it merges your branch.
+- Criteria about code (lint, tests) only apply when code changed. Write them that way, e.g. "If PHP files changed, the PHP lint passes", so a docs-only ticket is not left with a criterion nobody can tick.
+
+## Testing through the VM queue
+
+Tests, lint and test-stack runs happen only on the test VM, and only the pane `vm-runner` talks to it. As a ticket agent you never run `ssh`, `scripts/test-on-vm.sh` or `scripts/stack-on-vm.sh` yourself. The queue folder and the overview are in [test-vm.md](test-vm.md#only-vm-runner-uses-the-vm); the protocol itself is `../.vm-queue/README.md` (from the main checkout's root), the single source.
+
+- **When to queue**: whenever a criterion needs a run (pytest, lint, the test stack), after you committed the change it proves. Write `.vm-queue/<your-agent-name>.md` in the README's format, with the commit, `target` and what the run `proves`. Prefer `kind: batch`; use `single` only for runs that cannot be shared. Before you resolve, rebase onto the target branch; if the rebase changed files you touched, queue again with the new commit.
+- **Waiting**: check for `<your-agent-name>.result.md` every few minutes (a loop or monitor, not a foreground sleep). Only trust a result whose `commit` is your latest one.
+- **PASS**: quote the result's `run` and `summary` in your ticket as the VM evidence of the criteria it proves.
+- **FAIL**: the runner traced the failure to your branch. Fix it, commit, overwrite your request with the new commit and delete the old result file.
+- **CONFLICT**: your branch did not merge cleanly with the other queued branches. Rebase onto the current target branch, commit, and queue again the same way (if the result also has your branch's own run, read it first).
+- **ERROR**: the run itself broke (VM, SSH, slot timeout). Do nothing; the runner retries.
+
+## Terms
+
+- **Orchestrator**: the session that hands out tickets to ticket agents, reviews their branches and merges them.
+- **Ticket agent**: an agent that works on exactly one ticket, in its own git worktree on a branch `ticket/<id>`.
+- **Twin ticket**: the matching ticket in a sibling repo. It names the leading ticket under Blocked by and reuses its solution instead of working it out again.
+- **Handover**: what one ticket passes on to a ticket in another repo, written in its own ticket (see above).
+
 ## When a skill says "publish to the issue tracker"
 
 Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
