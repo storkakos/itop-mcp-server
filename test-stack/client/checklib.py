@@ -8,6 +8,11 @@ import sys
 import traceback
 
 
+class Skip(Exception):
+    """Raised by a check (or a flow it calls) that cannot run for a reason outside the code under test,
+    e.g. LibreChat's login limit. The check reports SKIP with the message instead of FAIL."""
+
+
 class Group:
     def __init__(self, module: str, title: str, order: int, services: tuple = (), ready=None):
         """module: the group file's __name__ (its last part is the group name).
@@ -45,6 +50,8 @@ class Group:
                         results.append(("SKIP", name, detail[5:]))
                     else:
                         results.append(("PASS", name, detail or ""))
+                except Skip as e:
+                    results.append(("SKIP", name, str(e)))
                 except Exception as e:  # noqa: BLE001
                     results.append(("FAIL", name, f"{type(e).__name__}: {e}"))
                     if "-v" in sys.argv:

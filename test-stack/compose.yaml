@@ -127,6 +127,10 @@ services:
       MONGO_URI: mongodb://mongo:27017/LibreChat
       NODE_EXTRA_CA_CERTS: /certs/ca.crt
       SEARCH: "false"
+      # Test stack only: LibreChat's login limit (every request under /oauth/ per IP, LOGIN_MAX per
+      # LOGIN_WINDOW minutes; LibreChat's default 7 per 5) raised so that the check list can run several
+      # times in a row. The example setup keeps LibreChat's default (see README, "LibreChat's login limit").
+      LOGIN_MAX: ${TEST_LIBRECHAT_LOGIN_MAX:-100}
     volumes:
       - ./librechat/librechat.yaml:/app/librechat.yaml:ro
       - ./certs/ca.crt:/certs/ca.crt:ro

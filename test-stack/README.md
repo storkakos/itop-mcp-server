@@ -243,13 +243,34 @@ undo: delete that folder and the desktop shortcut, and remove the test CA in `ce
 (Trusted Root Certification Authorities, "itop-mcp test CA"). If the PowerShell execution policy
 blocks the script, start it with `powershell -ExecutionPolicy Bypass -File .\open-browser.ps1 ...`.
 
+## LibreChat's login limit
+
+LibreChat limits logins per IP. It counts every request under `/oauth/`: the start and the callback
+of a login (two per login), and also the "connected" page after an MCP server's OAuth callback (the
+checks do not open it). Its settings are `LOGIN_MAX` requests per `LOGIN_WINDOW` minutes, by default
+7 per 5, in a fixed window that starts with the first request. Over the limit LibreChat answers
+`auth_rate_limited`. The check group `librechat` logs into LibreChat five times (ten requests), so with
+LibreChat's default a single run already reaches the limit and a second run right after it would too.
+
+- **The setting**: the test stack sets `LOGIN_MAX` on the `librechat` service from
+  `TEST_LIBRECHAT_LOGIN_MAX`, **100 by default** (`compose.yaml`). That is enough for many check runs in
+  one window. `LOGIN_WINDOW` keeps LibreChat's 5 minutes. The setting is in `compose.yaml`, not in
+  `librechat/librechat.env`, because that file follows the example setup, and
+  `docs/setup/example-keycloak-librechat.md` keeps LibreChat's normal limit: a real install should not
+  raise it. To try the checks with the normal limit:
+  `TEST_LIBRECHAT_LOGIN_MAX=7 docker compose up -d librechat` (recreates only LibreChat).
+- **When a check still hits it** (normal limit, or another client on the same IP): before a login the
+  checks look at LibreChat's `X-RateLimit-Remaining`; when the budget is used up they wait for the window
+  to end (`X-RateLimit-Reset`) and go on. When LibreChat answers `auth_rate_limited` anyway, they wait for
+  the window and try the login once more. Refused again, the check reports **SKIP** with the reason, and
+  so do the checks that need that login; the limit never makes a check FAIL. A wait shows in the check's
+  line (`waited N s for LibreChat's login limit`) and makes that run up to five minutes longer.
+- **Reset**: LibreChat keeps the count in memory, so restarting it starts a new window:
+  `docker compose restart librechat` (with `-p $RUN` on the VM). The checks wait until it answers again.
+
 ## Notes
 
-- LibreChat limits logins per IP: it counts every request under `/oauth/` (start and callback, so two
-  per login, and also the "connected" page after an MCP server's OAuth callback, which the checks do
-  not open) against `LOGIN_MAX` 7 per `LOGIN_WINDOW` 5 minutes. The group `librechat` logs into LibreChat three
-  times; when a login would hit the limit (for example because `checks.py` ran shortly before), it waits
-  for the window to end instead of failing, which makes that run up to five minutes longer.
+- LibreChat's login limit: see [LibreChat's login limit](#librechats-login-limit).
 - Checks for the LibreChat logout: the Keycloak setup run again keeps an attribute, a redirect URI and
   a post-logout redirect URI that another setup put on the `librechat` client; after `bob` logs out of
   LibreChat, Keycloak ends the session, the browser lands on LibreChat's login page, and **Sign in
