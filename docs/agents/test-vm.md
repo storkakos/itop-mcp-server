@@ -95,7 +95,7 @@ RUN=it-ti04; DIR=/root/itop-mcp-server-$RUN
 $SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && sh make-certs.sh >/dev/null &&
       docker compose -p $RUN up -d --build --quiet-pull"       # returns when the setup is complete
 # after each change: copy only the changed files, WITHOUT the rm -rf of the full copy (it would remove certs/)
-git diff --name-only HEAD | tar -T - -cf - | $SSH "tar -xf - -C $DIR"      # plus new files: git ls-files -o --exclude-standard
+git diff --name-only --diff-filter=d HEAD | tar -T - -cf - | $SSH "tar -xf - -C $DIR"      # plus new files: git ls-files -o --exclude-standard
 $SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN restart librechat"
 $SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN run --rm client python checks.py"      # or: ... python checks.py librechat (only that group)
 ```
