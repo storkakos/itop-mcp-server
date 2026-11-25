@@ -35,7 +35,7 @@ cat "$QUEUE/README.md"
 
 These are `vm-runner`'s job, not the ticket agent's:
 
-- the VM rules in [Sharing the VM](#sharing-the-vm): at most 3 stacks at once, a VM slot per stack, enough free RAM;
+- the VM rules in [Sharing the VM](#sharing-the-vm): at most 6 stacks at once, a VM slot per stack, at least 3 GB RAM available;
 - unique RUN names across repos (prefixed `it-`, `dl-`, `ra-`);
 - the shared LLM key (see [LLM key](#llm-key)): pointing runs at it, never printing it;
 - the [clean-up](#clean-up) after every run: stacks, volumes, networks, images, folders and slots of its RUNs, plus its integration branches and worktrees (local only, never pushed).
@@ -77,11 +77,11 @@ It copies the working tree to `/root/itop-mcp-server-$RUN`, takes a VM slot (see
 | the checks' code | the checks ran (0: no check failed) |
 | 2 | wrong usage, or this RUN is already in use on the VM (folder, slot or compose project) |
 | 3 | the stack did not start (or not within `START_TIMEOUT`, default 1500 s) |
-| 4 | no VM slot within `VM_SLOT_TIMEOUT` (default 1800 s) |
+| 4 | refused to start: no VM slot within `VM_SLOT_TIMEOUT` (default 1800 s), because all slots are taken or less than 3 GB RAM is available. `VM_SLOT_TIMEOUT=0` refuses at once |
 | 5 | the checks passed, but an LLM key showed up in a log, the check output or an image (see [LLM key](#llm-key)) |
 | 255 | SSH failed: VM not reachable, key refused or connection lost |
 
-RUN names must be unique on the whole VM, across repos: the compose project name is the bare `$RUN`, so an iTop and a Dolibarr run with the same name would share one project. Prefix the name with the repo, e.g. `it-ti02` here and `dl-ti02` in Dolibarr. The script refuses to start (exit 2) when the folder exists, when any slot already has that RUN, or when the VM has a container, volume or network of compose project `$RUN`. `RUN` must not be `local`, `latest`, `test-stack`, `itop-mcp-test` or `itop-mcp-smoke`, the stack's shared default tags and project names. The stack publishes no ports, so runs need no port of their own. `VM_HOST`, `VM_KEY` and `VM_KNOWN_HOSTS` work as for `test-on-vm.sh`; `VM_SLOT_MAX` (3) and `VM_SLOT_MIN_MB` (3072) change the slot rule. For the LLM key see [LLM key](#llm-key): the script points the stack at the shared key file and never copies it; without that file the chat checks report SKIP.
+RUN names must be unique on the whole VM, across repos: the compose project name is the bare `$RUN`, so an iTop and a Dolibarr run with the same name would share one project. Prefix the name with the repo, e.g. `it-ti02` here and `dl-ti02` in Dolibarr. The script refuses to start (exit 2) when the folder exists, when any slot already has that RUN, or when the VM has a container, volume or network of compose project `$RUN`. `RUN` must not be `local`, `latest`, `test-stack`, `itop-mcp-test` or `itop-mcp-smoke`, the stack's shared default tags and project names. The stack publishes no ports, so runs need no port of their own. `VM_HOST`, `VM_KEY` and `VM_KNOWN_HOSTS` work as for `test-on-vm.sh`; `VM_SLOT_MAX` (default 6) and `VM_SLOT_MIN_MB` (default 3072) change the slot rule. For the LLM key see [LLM key](#llm-key): the script points the stack at the shared key file and never copies it; without that file the chat checks report SKIP.
 
 If the script was killed so hard that its clean-up could not run (or SSH was gone), clean up by hand as described in [Clean up](#clean-up) and remove the slot: `rm -f /var/lib/test-vm-slots/itop-mcp-server-$RUN.lease`.
 
@@ -95,7 +95,7 @@ RUN=it-ti04; DIR=/root/itop-mcp-server-$RUN
 $SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && sh make-certs.sh >/dev/null &&
       docker compose -p $RUN up -d --build --quiet-pull"       # returns when the setup is complete
 # after each change: copy only the changed files, WITHOUT the rm -rf of the full copy (it would remove certs/)
-git diff --name-only HEAD | tar -T - -cf - | $SSH "tar -xf - -C $DIR"      # plus new files: git ls-files -o --exclude-standard
+git diff --name-only --diff-filter=d HEAD | tar -T - -cf - | $SSH "tar -xf - -C $DIR"      # plus new files: git ls-files -o --exclude-standard
 $SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN restart librechat"
 $SSH "cd $DIR/test-stack && export TEST_TAG=$RUN LLM_ENV_FILE=/root/shared/llm.env && docker compose -p $RUN run --rm client python checks.py"      # or: ... python checks.py librechat (only that group)
 ```
@@ -104,7 +104,7 @@ Which command picks up which change:
 
 | Changed | Command (as `docker compose -p $RUN ...`) |
 | --- | --- |
-| a file mounted into a service (`librechat/librechat.yaml`, `Caddyfile`, `nginx/*`): the content, not the compose file | `restart <service>` (`librechat`, `proxy`) |
+| a file mounted into a service (`librechat/librechat.yaml.tmpl`, `Caddyfile`, `nginx/*`): the content, not the compose file | `restart <service>` (`librechat`, `proxy`) |
 | `librechat/librechat.env`, a service's `environment:` or other compose settings | `up -d <service>` (recreates only that service) |
 | something a service is built from (`Dockerfile`, `src/`, `test-stack/client/`, `itop/`) | `up -d --build <service>` (`mcp`, `itop`), for the checks themselves `build client` |
 | the Keycloak realm, iTop's config or other things `client/setup.py` does once at the start | start from scratch (`stack-on-vm.sh`); the cheap re-run does not redo the setup |
@@ -118,14 +118,14 @@ The chat checks (example 7: a chat answer through LibreChat) need an LLM key. Th
 | | |
 | --- | --- |
 | File | `/root/shared/llm.env` (folder `/root/shared` 0700, file 0600, root:root, put there by the maintainer) |
-| Variables | `OPENROUTER_KEY`, `LLM_KEY`, `LLM_BASE_URL`, `LLM_MODEL` (`openrouter/free`) |
+| Variables | `LITELLM_KEY`, `LITELLM_BASE_URL`, `LITELLM_MODEL` (the shared LiteLLM endpoint; the endpoint's host name is only in the file, never in a repo, ticket or commit) |
 
 - This file is the only LLM key agents may use. Keys in other stacks' folders, `.env` files or containers are off limits, also when your chat check would otherwise be skipped: never read, copy or reuse them.
 - Never print the key, and never copy it into a repo, the run's folder, a ticket, a log or a commit. To see which variables the file has, print the names only: `$SSH "sed -n 's/=.*//p' /root/shared/llm.env"`.
 - `scripts/stack-on-vm.sh` lets the stack read the file where it is: it sets `LLM_ENV_FILE=/root/shared/llm.env`, and `test-stack/compose.yaml` passes that file to LibreChat and the check client as an `env_file` (optional), so the key is in their environment at runtime only, not in an image or a file of the run.
 - Without the file, every chat check reports `SKIP no shared LLM key`, and the run's exit code ignores SKIPs. To try that, point `VM_LLM_ENV` at a path that does not exist (`VM_LLM_ENV=/root/shared/none.env RUN=it-x bash scripts/stack-on-vm.sh`); never move or rename the real file.
-- After the checks the script looks for the key's values on the VM in the start log, the logs of all the stack's containers, the check output and the config of the run's images, and prints only where it found one (exit 5). By hand, compare on the VM without printing the key, e.g. `grep -qF "$(sed -n 's/^LLM_KEY=//p' /root/shared/llm.env | cut -c10-25)" <file> && echo found`.
-- The chat model is OpenRouter's free route `openrouter/free` (maintainer decision), set in `test-stack/librechat/librechat.yaml`.
+- After the checks the script looks for the key's values on the VM in the start log, the logs of all the stack's containers, the check output and the config of the run's images, and prints only where it found one (exit 5). By hand, compare on the VM without printing the key, e.g. `grep -qF "$(sed -n 's/^LITELLM_KEY=//p' /root/shared/llm.env | cut -c10-25)" <file> && echo found`.
+- LibreChat has one endpoint, `LiteLLM`, in `test-stack/librechat/librechat.yaml.tmpl`; key and base URL are read by LibreChat from `LITELLM_KEY` and `LITELLM_BASE_URL`, and the model name is rendered from `LITELLM_MODEL` into the config at every start of the `librechat` container (LibreChat does not substitute `${VAR}` in model names), so no model name is in the repo. A chat check that gets an empty answer asks once more and says so in its output (`chat answer empty, retrying once`).
 
 The sections below are the manual steps, for the smoke test and for debugging.
 
@@ -141,8 +141,8 @@ $SSH
 This section is `vm-runner`'s job (see [Only `vm-runner` uses the VM](#only-vm-runner-uses-the-vm)). The VM's RAM, not the number of agents, limits how many runs fit at once. It has no swap; when RAM runs out, SSH stops answering for many minutes and the kernel kills containers of other runs.
 
 - A **ticket stack** is a full test stack started for one ticket under its own RUN name. Starting one takes a **VM slot**.
-- At most 3 ticket stacks run at the same time. Start one only if at least 3 GB are available: `$SSH "free -m | awk '/^Mem:/{print \$7}'"` must print 3072 or more. If not, wait or ask the orchestrator.
-- `scripts/stack-on-vm.sh` keeps this rule for you: a **slot** is a lease file `/var/lib/test-vm-slots/<repo>-<RUN>.lease`, taken under `flock` on `/var/lib/test-vm-slots/.lock` only while fewer than 3 leases exist and at least 3072 MB are available; otherwise the script waits and says why. The folder is shared by every repo that uses the VM, so the limit counts all their stacks together. A lease whose run folder is gone for 15 minutes, or that is older than 3 hours, counts as left over by a killed run and is dropped. When you start a stack by hand, take a slot the same way or count the leases yourself.
+- At most 6 ticket stacks run at the same time, and only while at least 3 GB RAM are available. Start one only if at least 3 GB are available: `$SSH "free -m | awk '/^Mem:/{print \$7}'"` must print 3072 or more. If not, wait or ask the orchestrator.
+- `scripts/stack-on-vm.sh` keeps this rule for you: a **slot** is a lease file `/var/lib/test-vm-slots/<repo>-<RUN>.lease`, taken under `flock` on `/var/lib/test-vm-slots/.lock` only while fewer than 6 leases exist (`VM_SLOT_MAX`) and at least 3072 MB are available (`free -m`, column available; `VM_SLOT_MIN_MB`); otherwise the script waits and says why, and after `VM_SLOT_TIMEOUT` it refuses to start the stack (exit 4, message "refusing to start a stack"). It never starts a stack below the RAM limit. The folder is shared by every repo that uses the VM, so the limit counts all their stacks together. A lease whose run folder is gone for 15 minutes, or that is older than 3 hours, counts as left over by a killed run and is dropped. When you start a stack by hand, take a slot the same way or count the leases yourself.
 - Take your stack down right after the run, also when it failed: `docker compose -p $RUN down -v --remove-orphans`, then remove your images (see Clean up).
 - Never stop, change or read stacks, folders or files you did not create, including other stacks' `.env` and key files. Some stacks on the VM run permanently on purpose.
 

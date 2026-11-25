@@ -22,7 +22,7 @@
 #
 # Exit codes: the checks' own code once they ran; 2 wrong usage or RUN already in use on the VM
 # (by any repo: RUN is the bare compose project name, so prefix it, e.g. it-ti02); 3 the stack
-# did not start (the tail of the start log is printed); 4 no VM slot within VM_SLOT_TIMEOUT;
+# did not start (the tail of the start log is printed); 4 refused: no VM slot within VM_SLOT_TIMEOUT (all slots taken or less than VM_SLOT_MIN_MB RAM available);
 # 5 the checks passed but an LLM key showed up in a log, the check output or an image;
 # 255 SSH failed (VM not reachable, key refused, connection lost).
 #
@@ -32,8 +32,8 @@
 #   VM_HOST         default root@192.168.178.25
 #   VM_KEY          default ~/.ssh/itop-mcp-test-vm
 #   VM_KNOWN_HOSTS  default ~/.ssh/itop-mcp-test-vm.known_hosts
-#   VM_SLOT_MAX     ticket stacks at once on the VM (default 3)
-#   VM_SLOT_MIN_MB  available RAM needed to start (default 3072)
+#   VM_SLOT_MAX     ticket stacks at once on the VM (default 6)
+#   VM_SLOT_MIN_MB  available RAM in MB (free -m, column available) needed to start a stack (default 3072 = 3 GB)
 #   VM_SLOT_TIMEOUT seconds to wait for a slot before giving up (default 1800)
 #   START_TIMEOUT   seconds for build + start until the setup is complete (default 1500)
 #   VM_LLM_ENV      the shared LLM key file on the VM (default /root/shared/llm.env; point it at a
@@ -91,7 +91,7 @@ VM_HOST="${VM_HOST:-root@192.168.178.25}"
 DIR="/root/$REPO_NAME-$RUN"
 SLOT_DIR=/var/lib/test-vm-slots                # shared by all repos that use the VM
 LEASE="$SLOT_DIR/$REPO_NAME-$RUN.lease"
-SLOT_MAX="${VM_SLOT_MAX:-3}"
+SLOT_MAX="${VM_SLOT_MAX:-6}"
 SLOT_MIN_MB="${VM_SLOT_MIN_MB:-3072}"
 SLOT_TIMEOUT="${VM_SLOT_TIMEOUT:-1800}"
 START_TIMEOUT="${START_TIMEOUT:-1500}"
@@ -202,7 +202,7 @@ while :; do
     *)     msg="slot lock busy" ;;
   esac
   if [ "$(date +%s)" -ge "$deadline" ]; then
-    echo "$ME: no VM slot within ${SLOT_TIMEOUT}s ($msg); try later or ask the orchestrator" >&2
+    echo "$ME: refusing to start a stack: no VM slot within ${SLOT_TIMEOUT}s ($msg). The VM needs at least ${SLOT_MIN_MB} MB RAM available and fewer than ${SLOT_MAX} running stacks; try later or ask the orchestrator" >&2
     exit 4
   fi
   echo "$ME: waiting for a VM slot: $msg"

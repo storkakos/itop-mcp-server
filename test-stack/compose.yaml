@@ -96,6 +96,8 @@ services:
       - itop-www:/var/www/itop
       - downloads:/downloads:ro
       - ./certs/ca.crt:/ca.crt:ro
+      - ../README.md:/docs/README.md:ro      # group consent compares the docs' wording with iTop
+      - ../docs:/docs/docs:ro
     environment:
       REQUESTS_CA_BUNDLE: /ca.crt
     <<: *net
@@ -131,8 +133,21 @@ services:
       # LOGIN_WINDOW minutes; LibreChat's default 7 per 5) raised so that the check list can run several
       # times in a row. The example setup keeps LibreChat's default (see README, "LibreChat's login limit").
       LOGIN_MAX: ${TEST_LIBRECHAT_LOGIN_MAX:-100}
+      # LibreChat does not substitute ${VAR} in model names (only apiKey/baseURL), so the start renders the
+      # model name from LITELLM_MODEL into the config (template: librechat/librechat.yaml.tmpl).
+      CONFIG_PATH: /tmp/librechat.yaml
+    # This entrypoint replaces the image's, so the image's command (npm run backend) is repeated below.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        m=$$(printf '%s' "$$LITELLM_MODEL" | sed 's/[\\|&]/\\&/g')
+        sed "s|__LITELLM_MODEL__|$$m|g" /config/librechat.yaml.tmpl > /tmp/librechat.yaml
+        exec "$$@"
+      - sh
+    command: ["npm", "run", "backend"]
     volumes:
-      - ./librechat/librechat.yaml:/app/librechat.yaml:ro
+      - ./librechat/librechat.yaml.tmpl:/config/librechat.yaml.tmpl:ro
       - ./certs/ca.crt:/certs/ca.crt:ro
     <<: *net
 
@@ -144,6 +159,8 @@ services:
     volumes:
       - itop-www:/var/www/itop:ro      # check 4 reads config-itop.php
       - ./certs/ca.crt:/ca.crt:ro
+      - ../README.md:/docs/README.md:ro      # group consent compares the docs' wording with iTop
+      - ../docs:/docs/docs:ro
     environment:
       REQUESTS_CA_BUNDLE: /ca.crt
     env_file:

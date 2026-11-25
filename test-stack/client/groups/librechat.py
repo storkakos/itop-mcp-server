@@ -46,6 +46,7 @@ anna, bob = KC_USERS
 
 
 chats = {}
+failed = {}  # user -> why their LibreChat login failed (for another reason than the limit)
 skipped = {}  # user -> why their LibreChat login was skipped (LibreChat's login limit)
 
 
@@ -55,6 +56,9 @@ def _librechat(user):
         me = lc.login()
     except Skip as e:
         skipped[user[0]] = str(e)
+        raise
+    except Exception as e:
+        failed[user[0]] = f"{type(e).__name__}: {e}"
         raise
     assert me.get("email") == user[4], me
     chats[user[0]] = lc
@@ -67,6 +71,10 @@ def _chat(user):
     limit, this check is skipped too (with the same reason) instead of failing for lack of a session."""
     if user[0] in skipped:
         raise Skip(f"needs {user[0]}'s LibreChat login, skipped: {skipped[user[0]]}")
+    if user[0] in failed:
+        raise AssertionError(f"needs {user[0]}'s LibreChat login, which failed: {failed[user[0]]}")
+    if user[0] not in chats:
+        raise AssertionError(f"needs {user[0]}'s LibreChat login, which has not run (check 5 or 7 not run)")
     return chats[user[0]]
 
 
@@ -93,13 +101,18 @@ def _():
 
 def _whoami_chat(user):
     if not flows.llm_key_present():
-        return "SKIP no shared LLM key (/root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
+        return "SKIP no shared LLM key (LITELLM_KEY in /root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
     lc = _chat(user)
     spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == "itop-assistant")
     calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
+    retried = ""
+    if not calls and not text.strip():  # the model sometimes answers nothing: ask once more
+        print("chat answer empty, retrying once", flush=True)
+        retried = " (after one retry: first answer empty)"
+        calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
     outputs = " ".join(str(c.get("output")) for c in calls if "whoami" in (c.get("name") or ""))
     assert f"Angemeldet in iTop als: {user[2]} {user[3]}" in outputs, f"tool calls {calls}, answer {text[:200]}"
-    return text.strip()[:80]
+    return text.strip()[:80] + retried
 
 
 @check("example 7: whoami names the logged-in iTop user")

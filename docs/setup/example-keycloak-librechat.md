@@ -282,7 +282,7 @@ Keycloak returned. If there is none, the login is refused with "User not allowed
 For every person who should log in with Keycloak:
 
 1. Make sure a **Person** exists in iTop (usually it does).
-2. Create an **External user** (*Admin tools* → *User accounts* → *New* → *External user*) with:
+2. Create an **External user** (*Administration* → *User management* → *User accounts* → *New* → *External user*) with:
    - **Login**: the user's email exactly as in Keycloak
    - **Contact**: the Person
    - **Profiles**: what this person may do in iTop. To use the assistant, this includes one of the
@@ -741,7 +741,7 @@ connects **iTop** in LibreChat, the consent page names *their* iTop account
 | Keycloak: "Invalid redirect uri" after **Log out** | `OPENID_POST_LOGOUT_REDIRECT_URI` is not listed exactly under **Valid post logout redirect URIs** of the `librechat` client. |
 | **Sign in with Keycloak** logs the previous user in without a form | `OPENID_USE_END_SESSION_ENDPOINT` is not `true` (restart LibreChat after changing `.env`), so LibreChat never sent the browser to Keycloak's logout. |
 | iTop is still logged in as the previous user, and the consent page names the previous user | The `itop` client has no **Front channel logout** with the **Front-channel logout URL** `https://itop.example.com/pages/logoff.php`, or iTop and Keycloak are on different sites (see [Log out of Keycloak too](#env-log-out-of-keycloak-too)). Click **Deny**, log out of iTop, then connect again. |
-| LibreChat refuses the login as rate limited (`auth_rate_limited`) | LibreChat allows about 7 logins per 5 minutes per IP. Wait five minutes. |
+| LibreChat refuses the login as rate limited (`auth_rate_limited`) | LibreChat allows about 3 logins per 5 minutes per IP (it counts every request under `/oauth/`, about two per login). Wait five minutes. |
 
 ## Both MCP servers in one LibreChat
 
