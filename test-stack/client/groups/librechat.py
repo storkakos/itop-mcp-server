@@ -93,13 +93,18 @@ def _():
 
 def _whoami_chat(user):
     if not flows.llm_key_present():
-        return "SKIP no shared LLM key (/root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
+        return "SKIP no shared LLM key (LITELLM_KEY in /root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
     lc = _chat(user)
     spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == "itop-assistant")
     calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
+    retried = ""
+    if not calls and not text.strip():  # the model sometimes answers nothing: ask once more
+        print("chat answer empty, retrying once", flush=True)
+        retried = " (after one retry: first answer empty)"
+        calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
     outputs = " ".join(str(c.get("output")) for c in calls if "whoami" in (c.get("name") or ""))
     assert f"Angemeldet in iTop als: {user[2]} {user[3]}" in outputs, f"tool calls {calls}, answer {text[:200]}"
-    return text.strip()[:80]
+    return text.strip()[:80] + retried
 
 
 @check("example 7: whoami names the logged-in iTop user")

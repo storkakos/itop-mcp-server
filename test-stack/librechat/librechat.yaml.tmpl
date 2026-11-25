@@ -1,0 +1,53 @@
+# TEST ONLY. TEMPLATE of the LibreChat v0.8.9 config of the test stack: the snippets of
+# docs/setup/example-keycloak-librechat.md, plus one AI model (not part of the manual).
+# At container start (compose.yaml, service librechat) the placeholder for the model name (LITELLM_MODEL between double underscores) is replaced by
+# LITELLM_MODEL and the result is written to /tmp/librechat.yaml (CONFIG_PATH). LibreChat itself only
+# substitutes ${VAR} in apiKey and baseURL, not in model names, so the model name is rendered here, per
+# stack. Twin: dolibarr-mcp-server test-infra 10 has its own small render step; no shared script.
+version: 1.3.19
+
+# --- Your LLM endpoint (not part of the manual). The test stack uses the shared LiteLLM endpoint: key,
+# base URL and model all come from the key file (LITELLM_KEY, LITELLM_BASE_URL, LITELLM_MODEL; on the
+# test VM /root/shared/llm.env, else test-stack/llm.env). For another provider, change this block, the
+# variable names in llm.env and the preset below. Use a model that supports tool calls.
+endpoints:
+  custom:
+    - name: LiteLLM
+      apiKey: "${LITELLM_KEY}"
+      baseURL: "${LITELLM_BASE_URL}"
+      models:
+        default: ["__LITELLM_MODEL__"]
+        fetch: false
+      titleConvo: false
+
+# --- From the example manual, section "librechat.yaml: the iTop MCP server"
+mcpServers:
+  itop:
+    type: streamable-http
+    # Exactly the MCP server's MCP_RESOURCE_URL.
+    url: https://mcp.example.com/mcp
+    title: iTop
+    description: Tickets, CIs and contacts from iTop, with your own iTop rights
+    # Every user connects with their own iTop account.
+    requiresOAuth: true
+
+mcpSettings:
+  allowedDomains:
+    - "https://mcp.example.com"
+    - "https://itop.example.com"
+
+# With the option "iTop assistant preselected" (prioritize, enforce, default).
+modelSpecs:
+  prioritize: true
+  enforce: false
+  list:
+    - name: itop-assistant
+      default: true
+      label: iTop assistant
+      description: Answers questions about iTop with your own iTop rights
+      preset:
+        # Your endpoint and model (see above).
+        endpoint: LiteLLM
+        model: "__LITELLM_MODEL__"
+      mcpServers:
+        - itop
