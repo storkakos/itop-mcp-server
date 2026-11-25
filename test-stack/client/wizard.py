@@ -13,7 +13,7 @@ from common import ITOP, ITOP_ADMIN, browser, form_data, say
 
 
 def _choice_code(box) -> str:
-    """The extension code of a wizard checkbox: its id, or the data-id of the choice it sits in."""
+    """The extension code of a wizard checkbox: the data-id of the box itself or of the choice it sits in, else its id."""
     holder = box if box.has_attr("data-id") else box.find_parent(attrs={"data-id": True})
     return holder["data-id"] if holder is not None else box.get("id", "")
 

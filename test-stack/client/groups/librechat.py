@@ -46,6 +46,7 @@ anna, bob = KC_USERS
 
 
 chats = {}
+failed = {}  # user -> why their LibreChat login failed (for another reason than the limit)
 skipped = {}  # user -> why their LibreChat login was skipped (LibreChat's login limit)
 
 
@@ -55,6 +56,9 @@ def _librechat(user):
         me = lc.login()
     except Skip as e:
         skipped[user[0]] = str(e)
+        raise
+    except Exception as e:
+        failed[user[0]] = f"{type(e).__name__}: {e}"
         raise
     assert me.get("email") == user[4], me
     chats[user[0]] = lc
@@ -67,6 +71,10 @@ def _chat(user):
     limit, this check is skipped too (with the same reason) instead of failing for lack of a session."""
     if user[0] in skipped:
         raise Skip(f"needs {user[0]}'s LibreChat login, skipped: {skipped[user[0]]}")
+    if user[0] in failed:
+        raise AssertionError(f"needs {user[0]}'s LibreChat login, which failed: {failed[user[0]]}")
+    if user[0] not in chats:
+        raise AssertionError(f"needs {user[0]}'s LibreChat login, which has not run (check 5 or 7 not run)")
     return chats[user[0]]
 
 

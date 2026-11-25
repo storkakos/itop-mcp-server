@@ -63,7 +63,7 @@ git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - \
 # Our own -q only when the caller passes none: pytest counts -q, and -qq drops the summary line.
 quiet=-q
 for arg in "$@"; do
-  if [ "$arg" = -q ] || [ "$arg" = --quiet ]; then quiet=; fi
+  case "$arg" in -q*|--quiet|-[!-]*q*) quiet= ;; esac
 done
 
 # The folder is mounted read-only and copied inside the container, so the install leaves nothing
