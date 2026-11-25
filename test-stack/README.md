@@ -27,7 +27,7 @@ cd test-stack
 ./make-certs.sh                                   # test CA + certificate, in certs/ (git-ignored)
 docker compose up -d --build                      # first start: downloads iTop and installs it
 docker compose logs -f setup                      # wait for "setup complete" (about 5 minutes)
-docker compose run --rm client python checks.py   # runs both check lists
+docker compose run --rm client python checks.py   # runs both check lists (all groups, see Check groups)
 ```
 
 `checks.py` prints one line per check (`PASS`, `FAIL` or `SKIP`) and exits with 1 if a check failed.
@@ -35,6 +35,72 @@ docker compose run --rm client python checks.py   # runs both check lists
 
 Start over from a clean state: `docker compose down -v` (removes the volumes, including the
 downloads), then the commands above again.
+
+## Check groups
+
+The checks are split into groups, one file per group in `client/groups/`. The file name is the
+group name. Groups run in a fixed order, whatever order you name them in:
+
+| Group | File | Checks | Needs |
+|---|---|---|---|
+| `prerequisites` | `client/groups/prerequisites.py` | check list of the iTop prerequisites | setup only |
+| `proxy` | `client/groups/proxy.py` | the README's reverse proxy blocks (path prefix: nginx variant only, otherwise SKIP) | setup only |
+| `example` | `client/groups/example.py` | example setup, Keycloak and iTop: checks 1 to 4, the Keycloak setup run again | setup only |
+| `librechat` | `client/groups/librechat.py` | example setup, LibreChat: checks 5 to 8, the preselected iTop assistant | `librechat` (and Mongo) |
+
+"Setup only" means the one-shot `setup` service and what it depends on: proxy, MariaDB, iTop,
+Keycloak, Mailpit and the MCP server. LibreChat and Mongo are not needed and need not run.
+
+```sh
+docker compose run --rm client python checks.py                          # all groups
+docker compose run --rm client python checks.py prerequisites example    # only these (also: prerequisites,example)
+docker compose run --rm client python checks.py --list                   # groups and their checks
+```
+
+Only groups without LibreChat, on a stack that starts neither LibreChat nor Mongo (clearly less
+RAM): start the `setup` service alone (compose starts its dependencies) and wait until it is done:
+
+```sh
+docker compose up -d --build setup && docker compose wait setup           # exit code 0: setup complete
+docker compose run --rm client python checks.py prerequisites proxy example
+```
+
+`python checks.py --services <groups>` prints the services to start for those groups (`setup`, plus
+`librechat` for the group `librechat`); `scripts/stack-on-vm.sh --groups` uses it. Before the first
+check of the group `librechat`, the checks wait until LibreChat answers (`/health`, and `/api/config`
+offers the Keycloak login), up to `LIBRECHAT_READY_TIMEOUT` seconds (default 300). If it does not,
+every check of the group fails with "not run: LibreChat at … not ready within … s".
+
+### Add a check
+
+Add it to the group's file, under the other checks of that group:
+
+```python
+@check("example 9: what the manual promises, in a few words")
+def _():
+    ...                       # assert what must hold; an exception makes the check FAIL
+    return "detail"           # optional: shown after PASS; return "SKIP <reason>" to skip
+```
+
+Checks run in the order of the file. A check may use what an earlier check of the same group left
+behind (e.g. the LibreChat sessions in `librechat.py`), never what another group did: each group
+must also run alone.
+
+### Add a group
+
+A new file `client/groups/<name>.py` (lowercase letters, digits, `_`), no other file changes:
+
+```python
+from checklib import Group
+
+group = Group(__name__, "Heading printed before the checks (the manual it checks)", order=50,
+              services=(),     # compose services needed besides the setup, e.g. ("librechat",)
+              ready=None)      # optional: called before the first check, to wait for those services
+check = group.check
+```
+
+`order` places the group among the others (10, 20, 30, 40 are taken). Mention the group in the
+table above.
 
 ## What the stack does, and where it follows the manuals
 
@@ -47,8 +113,8 @@ downloads), then the commands above again.
 | Edit `config-itop.php` | `client/config_edits.py` | prerequisites, "Configure iTop"; example, "iTop: log in with Keycloak" |
 | Realm `example`, clients `itop` (with front-channel logout to iTop's logoff page) and `librechat` (with the post-logout redirect URI), email lock-down, test users. An existing client is merged, not replaced: settings the setup does not own stay | `client/keycloak_realm.py` (admin REST API, the manual's values) | example, Keycloak sections |
 | LibreChat `.env` (Keycloak login and logout) and `librechat.yaml` | `librechat/` | example, "LibreChat" |
-| Check lists | `client/checks.py` | both "Check list" sections |
-| User switch in one browser: A connects iTop and logs out, B logs in and connects; B must consent and get a token as B. Runs as the last check of `checks.py`; `python user_switch.py` prints each step | `client/user_switch.py` | example, check 8 |
+| Check lists, one file per check group (see [Check groups](#check-groups)) | `client/groups/*.py`, run by `client/checks.py` | both "Check list" sections |
+| User switch in one browser: A connects iTop and logs out, B logs in and connects; B must consent and get a token as B. Runs as the last check of the group `librechat`; `python user_switch.py` prints each step | `client/user_switch.py` | example, check 8 |
 | nginx in front of the MCP server, also under a path prefix (nginx variant only) | `compose.nginx.yaml`, `nginx/start.sh` | README, "Reverse proxy (TLS)" |
 
 Differences from the manuals, all for a local test: the Keycloak realm is created (the manual
@@ -181,7 +247,7 @@ blocks the script, start it with `powershell -ExecutionPolicy Bypass -File .\ope
 
 - LibreChat limits logins per IP: it counts every request under `/oauth/` (start and callback, so two
   per login, and also the "connected" page after an MCP server's OAuth callback, which the checks do
-  not open) against `LOGIN_MAX` 7 per `LOGIN_WINDOW` 5 minutes. `checks.py` logs into LibreChat three
+  not open) against `LOGIN_MAX` 7 per `LOGIN_WINDOW` 5 minutes. The group `librechat` logs into LibreChat three
   times; when a login would hit the limit (for example because `checks.py` ran shortly before), it waits
   for the window to end instead of failing, which makes that run up to five minutes longer.
 - Checks for the LibreChat logout: the Keycloak setup run again keeps an attribute, a redirect URI and

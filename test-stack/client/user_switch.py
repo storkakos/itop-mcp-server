@@ -7,7 +7,7 @@ survived the logout, the consent page named A and B's LibreChat got a token for 
 
     docker compose run --rm client python user_switch.py   # prints each step, exit 1 on the wrong user
 
-checks.py runs the same scenario as one check (see run()).
+checks.py runs the same scenario as one check of the group "librechat" (groups/librechat.py, see run()).
 """
 import re
 import sys
