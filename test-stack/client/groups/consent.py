@@ -17,14 +17,13 @@ from bs4 import BeautifulSoup
 import flows
 from checklib import Group
 from common import ITOP, ITOP_ADMIN, MCP, browser, follow, page_text
+from menupaths import MENU_DOCS, WORDING_DOCS, parse_menu_paths
 
 group = Group(__name__, "Consent page wording and iTop menu paths of the docs, checked against iTop", order=15)
 check = group.check
 
 # The docs, mounted read-only into the client container (compose.yaml).
 DOCS = Path(os.environ.get("TEST_DOCS", "/docs"))
-WORDING_DOCS = ["README.md", "docs/setup/itop-prerequisites.md", "docs/setup/example-keycloak-librechat.md"]
-MENU_DOCS = WORDING_DOCS + ["docs/quick-start.md"]
 HEADLINE = "Not available for your account"
 
 
@@ -83,21 +82,13 @@ def _admin_menu() -> list:
     soup = BeautifulSoup(r.text, "lxml")
     nav = soup.select_one(".ibo-navigation-menu") or soup
     labels = [re.sub(r"\s+", " ", t).strip() for t in nav.stripped_strings]
-    assert "Administration" in labels, f"no 'Administration' in the menu: {labels[:40]}"
+    assert "Administration" in labels, f"no 'Administration' in the menu: {labels}"
     return labels
 
 
 def _documented_paths() -> list:
-    """Menu chains from the docs: '*Administration* → *User management* → *User accounts* → *New* → ...' up to the first action."""
-    paths = set()
-    for rel in MENU_DOCS:
-        for m in re.finditer(r"Administration[*]* (?:→ [*]*[^*→|.(),]+[*]* ?)+", _doc(rel).replace("*", "")):
-            parts = [p.strip() for p in m.group(0).split("→")]
-            for stop in ("New", "the user"):  # an action or a record, not a menu entry
-                if stop in parts:
-                    parts = parts[:parts.index(stop)]
-            paths.add(tuple(parts))
-    return sorted(paths)
+    """Menu chains from the docs (menupaths.py takes only their bold/italic segments)."""
+    return sorted({p for rel in MENU_DOCS for p in parse_menu_paths((DOCS / rel).read_text(encoding="utf-8"))})
 
 
 @check("consent: the menu paths the docs name exist for an administrator, including Profiles under User management")
@@ -115,5 +106,5 @@ def _():
             except ValueError:
                 missing.append(" → ".join(path) + f" (no '{item}')")
                 break
-    assert not missing, "menu path not in iTop: " + "; ".join(missing) + f" | menu: {labels[:60]}"
+    assert not missing, "menu path not in iTop: " + "; ".join(missing) + f" | full menu: {labels}"
     return "; ".join(" → ".join(p) for p in paths)
