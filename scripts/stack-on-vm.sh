@@ -121,7 +121,7 @@ vm "if [ -e $DIR ]; then echo 'its folder $DIR exists'; exit 1; fi
     fi
   done" >&2 || rc=$?
 if [ "$rc" -ne 0 ]; then
-  echo "$ME: RUN=$RUN is already in use on the VM (see above), maybe by another repo; pick another RUN, e.g. it-$RUN" >&2
+  echo "$ME: RUN=$RUN is already in use on the VM (see above), maybe by another repo; pick another RUN, prefixed with the repo (e.g. it-ti02)" >&2
   exit 2
 fi
 trap cleanup EXIT
