@@ -33,6 +33,17 @@ From a worktree, change nothing in the main checkout except your own ticket file
 - A ticket never asks you to change a ticket or file of another repo. If something has to be handed over to another repo, write it in your own ticket under a heading `## Handover to <repo> <NN>`. The orchestrator carries it over when it merges your branch.
 - Criteria about code (lint, tests) only apply when code changed. Write them that way, e.g. "If PHP files changed, the PHP lint passes", so a docs-only ticket is not left with a criterion nobody can tick.
 
+## Testing through the VM queue
+
+Tests, lint and test-stack runs happen only on the test VM, and only the pane `vm-runner` talks to it. As a ticket agent you never run `ssh`, `scripts/test-on-vm.sh` or `scripts/stack-on-vm.sh` yourself. The queue folder and the overview are in [test-vm.md](test-vm.md#only-vm-runner-uses-the-vm); the protocol itself is `../.vm-queue/README.md` (from the main checkout's root), the single source.
+
+- **When to queue**: whenever a criterion needs a run (pytest, lint, the test stack), after you committed the change it proves. Write `.vm-queue/<your-agent-name>.md` in the README's format, with the commit, `target` and what the run `proves`. Prefer `kind: batch`; use `single` only for runs that cannot be shared. Before you resolve, rebase onto the target branch; if the rebase changed files you touched, queue again with the new commit.
+- **Waiting**: check for `<your-agent-name>.result.md` every few minutes (a loop or monitor, not a foreground sleep). Only trust a result whose `commit` is your latest one.
+- **PASS**: quote the result's `run` and `summary` in your ticket as the VM evidence of the criteria it proves.
+- **FAIL**: the runner traced the failure to your branch. Fix it, commit, overwrite your request with the new commit and delete the old result file.
+- **CONFLICT**: your branch did not merge cleanly with the other queued branches. Rebase onto the current target branch, commit, and queue again the same way (if the result also has your branch's own run, read it first).
+- **ERROR**: the run itself broke (VM, SSH, slot timeout). Do nothing; the runner retries.
+
 ## Terms
 
 - **Orchestrator**: the session that hands out tickets to ticket agents, reviews their branches and merges them.

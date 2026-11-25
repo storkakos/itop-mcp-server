@@ -395,7 +395,9 @@ bash scripts/test-on-vm.sh
 bash scripts/test-on-vm.sh tests/test_config.py -x
 ```
 
-See [docs/agents/test-vm.md](docs/agents/test-vm.md) for the VM, run names and cleanup.
+See [docs/agents/test-vm.md](docs/agents/test-vm.md) for the VM, run names and cleanup. When
+several agents work at once, only the `vm-runner` session runs this; ticket agents queue a request
+instead (see [Only `vm-runner` uses the VM](docs/agents/test-vm.md#only-vm-runner-uses-the-vm)).
 
 On a Linux machine, run them directly:
 
