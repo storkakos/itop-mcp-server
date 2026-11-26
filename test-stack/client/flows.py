@@ -122,6 +122,42 @@ def mcp_token(login: str, user: str, pwd: str, url: str = MCP) -> str:
     return tok.json()["access_token"]
 
 
+MY_ACCOUNT = f"{ITOP}/pages/exec.php?exec_module=combodo-my-account&exec_page=index.php&exec_env=production"
+TOKEN_AJAX = f"{ITOP}/pages/exec.php?exec_module=authent-token&exec_page=ajax.php&exec_env=production"
+
+
+def hand_made_token(user: str, pwd: str, application: str) -> str:
+    """A personal token made by hand under My Account (iTop login form, "My personal tokens", "+",
+    save), not through OAuth: the requests the page's buttons send. Returns the token iTop shows once."""
+    b = browser()
+    r = b.get(MY_ACCOUNT)
+    if BeautifulSoup(r.text, "lxml").find("form", id="login_form"):
+        r = b.post(MY_ACCOUNT, data={"auth_user": user, "auth_pwd": pwd, "login_mode": "form", "loginop": "login"})
+    assert r.status_code == 200 and "My personal tokens" in r.text, \
+        f"My Account without 'My personal tokens' ({r.status_code}): {page_text(r.text, 300)}"
+    # "+" on the tokens panel: the creation form, as the dialog shows it.
+    r = b.post(f"{TOKEN_AJAX}&operation=EditToken&token_id=0")
+    form = BeautifulSoup(r.text, "lxml").find("form")
+    assert form is not None, f"no token form: {page_text(r.text, 300)}"
+    d = form_data(form)
+    assert d.get("operation") == "apply_new", d.get("operation")
+    d["attr_application"] = application
+    if "attr_scope" in d:  # the set widget's JSON: keep the default scope, make sure REST/JSON is in it
+        scope = json.loads(d["attr_scope"] or "{}")
+        rest = [v["code"] for v in scope.get("possible_values", [])
+                if v.get("code") in ("WebService", "REST/JSON") or "REST" in str(v.get("label"))]
+        orig = scope.get("orig_value") or []
+        d["attr_scope"] = json.dumps({"orig_value": orig, "added": [c for c in rest[:1] if c not in orig],
+                                      "removed": [], "partial_values": []})
+    # "Save": the dialog posts the form to ajax.php, then reloads My Account, which shows the token once.
+    r = b.post(TOKEN_AJAX, data=d)
+    assert r.status_code == 200 and '"error"' not in r.text, f"save: {r.status_code} {r.text[:200]}"
+    r = b.get(MY_ACCOUNT)
+    m = re.search(r"auth_token=(?:<a[^>]*>)?([^<\s\"']+)", r.text)
+    assert m, f"My Account shows no new token: {page_text(r.text, 300)}"
+    return m.group(1)
+
+
 def itop_keycloak_login(user: str, pwd: str) -> str:
     """Example check 3: Keycloak login into iTop. Returns the name iTop greets."""
     b = browser()

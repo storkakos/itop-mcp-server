@@ -17,6 +17,9 @@ MCP = os.environ.get("TEST_MCP_URL", "https://mcp.example.com/mcp")
 # The same server under a path prefix, behind the README's nginx block for that case. Set only by the
 # nginx variant (compose.nginx.yaml); without it the path-prefix check is skipped.
 MCP_PREFIX = os.environ.get("TEST_MCP_PREFIX_URL", "")
+# The MCP server's audit log as the client sees it (the repo stack mounts the server's log volume read-only).
+# Without it the audit-log check is skipped.
+AUDIT_LOG = os.environ.get("TEST_MCP_AUDIT_LOG", "")
 
 
 def metadata_url(resource: str) -> str:

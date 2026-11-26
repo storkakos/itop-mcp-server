@@ -43,7 +43,7 @@ group name. Groups run in a fixed order, whatever order you name them in:
 
 | Group | File | Checks | Needs |
 |---|---|---|---|
-| `prerequisites` | `client/groups/prerequisites.py` | check list of the iTop prerequisites | setup only |
+| `prerequisites` | `client/groups/prerequisites.py` | check list of the iTop prerequisites, plus: a personal token made by hand under *My Account* (not through OAuth) gets `code: 0` from `rest.php` but `401` with the OAuth challenge from the MCP server, and the audit log has a `refused: not an OAuth token` line without the token (see [Hand-made token check](#hand-made-token-check)) | setup only |
 | `proxy` | `client/groups/proxy.py` | the README's reverse proxy blocks (path prefix: nginx variant only, otherwise SKIP) | setup only |
 | `consent` | `client/groups/consent.py` | the consent page wording for an account without the profile and the iTop menu paths, as the docs quote them (iTop login form, no LibreChat login) | setup only |
 | `example` | `client/groups/example.py` | example setup, Keycloak and iTop: checks 1 to 4, the Keycloak setup run again | setup only |
@@ -81,6 +81,7 @@ stack can set them instead of patching the groups at run time.
 | Setting | Group | Default | Description |
 |---|---|---|---|
 | `TEST_MCP_URL` | all (`common.MCP`) | `https://mcp.example.com/mcp` | The MCP server's public address: the checks call it, compare it with the metadata and config, and expect it in the LibreChat config |
+| `TEST_MCP_AUDIT_LOG` | `prerequisites` | empty (SKIP) | The MCP server's audit log as the client sees it. The repo stack mounts the server's log volume `mcp-logs` read-only into the client and sets `/mcp-logs/mcp-itop-audit.log`; without it the audit-log part of the hand-made token check reports SKIP |
 | `TEST_DEFAULT_SPEC` | `librechat` | `itop-assistant` | The name of the assistant spec LibreChat preselects. With the default the spec must have exactly the itop server; with another name (the combined stack's `combo-assistant`) the itop server must be one of its servers |
 | `TEST_CHAT_SPEC` | `librechat` | `TEST_DEFAULT_SPEC` | The assistant spec used to start chats (whoami checks). Defaults to `TEST_DEFAULT_SPEC` so the repo stack behaves as before; the combined stack sets it to `itop-assistant` while `TEST_DEFAULT_SPEC` is `combo-assistant` |
 
@@ -90,6 +91,22 @@ a repo's groups):
 ```sh
 docker compose run --rm -e TEST_DEFAULT_SPEC=combo-assistant client python checks.py librechat
 ```
+
+### Hand-made token check
+
+Two checks of the group `prerequisites` show that the MCP server accepts only OAuth tokens
+(docs/setup/itop-prerequisites.md, "Which tokens the MCP server accepts"):
+
+1. `prerequisites: a hand-made personal token works at rest.php, the MCP server refuses it`: logs into
+   iTop with the login form as the local test user `lena.local`, opens *My Account* → *My personal
+   tokens*, creates a token with "+" and "Save" (the requests the page sends to authent-token's
+   `ajax.php`) and reads the token from the message iTop shows once. Then `rest.php` with
+   `auth_token` answers `list_operations` with `code: 0`, `mcp/token_info` reports `oauth: false`, and
+   the MCP server answers `401` with `WWW-Authenticate` naming `resource_metadata`.
+2. `prerequisites: the audit log records the refusal, without the token`: reads the server's audit log
+   (`TEST_MCP_AUDIT_LOG`, see [Group settings](#group-settings)) and expects a line with
+   `"user": "lena.local"`, `"tool": null`, `"ok": false`, `"info": "refused: not an OAuth token"`; the
+   token itself must appear nowhere in the log.
 
 ### Add a check
 

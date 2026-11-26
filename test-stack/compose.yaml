@@ -77,9 +77,11 @@ services:
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8130"
       SSL_CERT_FILE: /etc/itop-mcp/ca.pem
-      MCP_AUDIT_LOG: /tmp/mcp-itop-audit.log
+      # Default path /data/logs: the volume mcp-logs, which the client reads (group prerequisites, hand-made token).
+      MCP_AUDIT_LOG: /data/logs/mcp-itop-audit.log
     volumes:
       - ./certs/ca.crt:/etc/itop-mcp/ca.pem:ro
+      - mcp-logs:/data/logs
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -159,11 +161,13 @@ services:
     command: ["python", "checks.py"]
     volumes:
       - itop-www:/var/www/itop:ro      # check 4 reads config-itop.php
+      - mcp-logs:/mcp-logs:ro          # group prerequisites reads the MCP server's audit log
       - ./certs/ca.crt:/ca.crt:ro
       - ../README.md:/docs/README.md:ro      # group consent compares the docs' wording with iTop
       - ../docs:/docs/docs:ro
     environment:
       REQUESTS_CA_BUNDLE: /ca.crt
+      TEST_MCP_AUDIT_LOG: /mcp-logs/mcp-itop-audit.log
     env_file:
       - path: ${LLM_ENV_FILE:-./llm.env}
         required: false
@@ -178,3 +182,4 @@ volumes:
   downloads: {}
   keycloak: {}
   mongo: {}
+  mcp-logs: {}
