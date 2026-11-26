@@ -280,12 +280,18 @@ LibreChat's default a single run already reaches the limit and a second run righ
   `docs/setup/example-keycloak-librechat.md` keeps LibreChat's normal limit: a real install should not
   raise it. To try the checks with the normal limit:
   `TEST_LIBRECHAT_LOGIN_MAX=7 docker compose up -d librechat` (recreates only LibreChat).
+- **`LIBRECHAT_LOGIN_WINDOW`**: if LibreChat does not send an `X-RateLimit-Reset` header, the checks
+  fall back to waiting a whole window. The length of that window is taken from `LIBRECHAT_LOGIN_WINDOW`
+  (minutes, default 5, LibreChat's default). Set it if you change `LOGIN_WINDOW` on your LibreChat
+  instance.
 - **When a check still hits it** (normal limit, or another client on the same IP): before a login the
   checks look at LibreChat's `X-RateLimit-Remaining`; when the budget is used up they wait for the window
   to end (`X-RateLimit-Reset`) and go on. When LibreChat answers `auth_rate_limited` anyway, they wait for
   the window and try the login once more. Refused again, the check reports **SKIP** with the reason, and
   so do the checks that need that login; the limit never makes a check FAIL. A wait shows in the check's
-  line (`waited N s for LibreChat's login limit`) and makes that run up to five minutes longer.
+  line (`waited N s for LibreChat's login limit`). In the worst case one login waits up to three times:
+  once before starting (pre-check), once after the first refusal, and once before the retry starts
+  (pre-check again inside the retry).
 - **Reset**: LibreChat keeps the count in memory, so restarting it starts a new window:
   `docker compose restart librechat` (with `-p $RUN` on the VM). The checks wait until it answers again.
 
