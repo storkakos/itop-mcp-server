@@ -80,13 +80,14 @@ stack can set them instead of patching the groups at run time.
 
 | Setting | Group | Default | Description |
 |---|---|---|---|
-| `TEST_MCP_URL` | `librechat` | `https://mcp.example.com/mcp` | The MCP server's address expected in the LibreChat config |
-| `TEST_DEFAULT_SPEC` | `librechat` | `itop-assistant` | The name of the preselected assistant spec |
+| `TEST_MCP_URL` | all (`common.MCP`) | `https://mcp.example.com/mcp` | The MCP server's public address: the checks call it, compare it with the metadata and config, and expect it in the LibreChat config |
+| `TEST_DEFAULT_SPEC` | `librechat` | `itop-assistant` | The name of the assistant spec LibreChat preselects. With the default the spec must have exactly the itop server; with another name (the combined stack's `combo-assistant`) the itop server must be one of its servers |
 
-Set them as environment variables when running the checks:
+Set them as environment variables of the client (the combined stack's client sets them before it imports
+a repo's groups):
 
 ```sh
-docker compose run --rm -e TEST_MCP_URL=http://mcp-server:8080/mcp client python checks.py librechat
+docker compose run --rm -e TEST_DEFAULT_SPEC=combo-assistant client python checks.py librechat
 ```
 
 ### Add a check
