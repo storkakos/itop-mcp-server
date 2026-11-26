@@ -49,6 +49,21 @@ def _():
     return answer
 
 
+@check("prerequisites: all four discovery URLs answer with the metadata")
+def _():
+    urls = [
+        f"{ITOP}/.well-known/oauth-authorization-server/env-production/altioo-oauth-server",
+        f"{ITOP}/.well-known/openid-configuration/env-production/altioo-oauth-server",
+        f"{ITOP}/env-production/altioo-oauth-server/.well-known/oauth-authorization-server",
+        f"{ITOP}/env-production/altioo-oauth-server/.well-known/openid-configuration",
+    ]
+    for u in urls:
+        r = requests.get(u)
+        assert r.status_code == 200, f"{u}: {r.status_code}"
+        d = r.json()
+        assert d.get("issuer") == ISSUER, f"{u}: issuer {d.get('issuer')}"
+
+
 @check("prerequisites: extension directory is private except index.php")
 def _():
     for p in ("README.md", "src/", "vendor/autoload.php"):
