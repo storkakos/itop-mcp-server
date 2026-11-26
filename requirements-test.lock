@@ -1,0 +1,17 @@
+# Exact test-only dependencies (Linux, Python 3.13), installed by scripts/test-on-vm.sh with
+# --no-deps on top of requirements.lock and requirements-build.lock. Never part of the image.
+# Top-level pins live in [project.optional-dependencies] test in pyproject.toml; requests,
+# beautifulsoup4 and lxml match test-stack/client/Dockerfile, whose flows.py the login-limit tests
+# import. Packages already pinned in the other two locks (certifi, idna, packaging, pygments,
+# typing-extensions) are left out here. Regenerate in a Linux python:3.13-slim container:
+# pip install -r requirements.lock -r requirements-build.lock ".[test]" && pip freeze,
+# keeping only the packages that are in neither of the other locks.
+beautifulsoup4==4.13.5
+charset-normalizer==3.5.3
+iniconfig==2.3.1
+lxml==6.0.2
+pluggy==1.7.0
+pytest==8.4.2
+requests==2.32.5
+soupsieve==4.1.3
+urllib3==2.8.0
