@@ -204,7 +204,26 @@ volumes stay.
   401 with the prefixed metadata URL, the metadata itself, and whoami with a token. The token comes
   from the normal OAuth flow; the server does not check the token's resource.
 - `itop.example.com`, `sso.example.com` and `chat.example.com` are plain proxy blocks of the stack
-  (`nginx/stack.conf`). iTop itself stays on Apache.
+  (`nginx/stack.conf`). iTop itself stays on Apache; for iTop on nginx see the next section.
+
+## iTop on nginx and PHP-FPM
+
+`compose.itop-nginx.yaml` replaces iTop's Apache with nginx + PHP-FPM (image built from
+`itop-nginx/`, context `test-stack/`). At start-up `itop-nginx/entrypoint.sh` takes the two nginx
+code blocks of [docs/setup/itop-prerequisites.md](../docs/setup/itop-prerequisites.md#nginx) and
+builds iTop's server block from them: the rewrites and the private extension directory go in as
+they are, the "PHP behind a reverse proxy" lines are appended to `fastcgi_params`, and an upstream
+`php-fpm` points at the container's PHP-FPM. The generated file is printed in `docker compose logs
+itop`. If a block is missing or nginx refuses it, iTop does not start. It combines with the nginx
+TLS proxy:
+
+```sh
+docker compose -f compose.yaml -f compose.itop-nginx.yaml up -d --build
+docker compose -f compose.yaml -f compose.nginx.yaml -f compose.itop-nginx.yaml up -d --build   # both
+```
+
+On the test VM: `scripts/stack-on-vm.sh --itop-webserver nginx [--nginx]`. The `itop-www` volume
+is the same as in the Apache variant, so `up -d` with the other set of files switches an existing stack.
 
 ## Reach the services with IP and port (optional)
 
