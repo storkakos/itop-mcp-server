@@ -12,8 +12,14 @@ from common import CHAT, KC_USERS, REALM, SSO
 
 # Group settings (see combined-test-stack GLOSSARY): values the group takes from the stack it runs on.
 # Defaults are the repo stack's values, so the repo stack behaves as before.
-TEST_MCP_URL = os.environ.get("TEST_MCP_URL", "https://mcp.example.com/mcp")
-TEST_DEFAULT_SPEC = os.environ.get("TEST_DEFAULT_SPEC", "itop-assistant")
+# TEST_MCP_URL is read in common.py (common.MCP), so every group uses the same address.
+# With the own spec the preselected assistant must have exactly the itop server; with another spec (the
+# combined stack's assistant has several servers) the itop server must be one of them.
+OWN_SPEC = "itop-assistant"
+TEST_DEFAULT_SPEC = os.environ.get("TEST_DEFAULT_SPEC", OWN_SPEC)
+# Spec used to start chats. Defaults to TEST_DEFAULT_SPEC so the repo stack behaves as before;
+# the combined stack sets it to the repo's own assistant while TEST_DEFAULT_SPEC is combo-assistant.
+TEST_CHAT_SPEC = os.environ.get("TEST_CHAT_SPEC", TEST_DEFAULT_SPEC)
 
 # Seconds to wait for LibreChat before the first check of this group (it boots after the setup).
 READY_TIMEOUT = int(os.environ.get("LIBRECHAT_READY_TIMEOUT", "300"))
@@ -100,15 +106,17 @@ def _():
 def _():
     specs = _chat(anna).config()["modelSpecs"]
     spec = next(x for x in specs["list"] if x["name"] == TEST_DEFAULT_SPEC)
-    assert specs.get("prioritize") is True and spec.get("default") is True and spec.get("mcpServers") == ["itop"], specs
-    return f"default spec {TEST_DEFAULT_SPEC} with the itop server"
+    servers = spec.get("mcpServers") or []
+    own = servers == ["itop"] if TEST_DEFAULT_SPEC == OWN_SPEC else "itop" in servers
+    assert specs.get("prioritize") is True and spec.get("default") is True and own, specs
+    return f"default spec {TEST_DEFAULT_SPEC} with the itop server" + ("" if servers == ["itop"] else f" (servers {servers})")
 
 
 def _whoami_chat(user):
     if not flows.llm_key_present():
         return "SKIP no shared LLM key (LITELLM_KEY in /root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
     lc = _chat(user)
-    spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == TEST_DEFAULT_SPEC)
+    spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == TEST_CHAT_SPEC)
     whoami_prompt = "Use the whoami tool: who am I in iTop?"
     calls, text = lc.ask(whoami_prompt, spec)
     retried = ""

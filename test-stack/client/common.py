@@ -10,10 +10,10 @@ from bs4 import BeautifulSoup
 ITOP = "https://itop.example.com"
 SSO = "https://sso.example.com"
 CHAT = "https://chat.example.com"
-# The MCP server's public URL (its MCP_RESOURCE_URL). The only place the test client names it: checks,
-# flows and config edits all use these values, so the check list runs unchanged against another
-# hostname or path once the stack (compose.yaml, Caddyfile, librechat.yaml, certificate) matches.
-MCP = "https://mcp.example.com/mcp"
+# The MCP server's public URL (its MCP_RESOURCE_URL), group setting TEST_MCP_URL (README "Group settings").
+# The only place the test client names it: checks, flows and config edits all use this value. The default
+# is the repo stack's; the combined stack, where each repo's server has its own host name, sets the variable.
+MCP = os.environ.get("TEST_MCP_URL", "https://mcp.example.com/mcp")
 # The same server under a path prefix, behind the README's nginx block for that case. Set only by the
 # nginx variant (compose.nginx.yaml); without it the path-prefix check is skipped.
 MCP_PREFIX = os.environ.get("TEST_MCP_PREFIX_URL", "")
