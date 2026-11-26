@@ -41,20 +41,26 @@ class FakeResponse:
 
 
 class FakeBrowser:
-    """Records calls and returns scripted responses."""
+    """Records calls and returns scripted responses in order."""
 
     def __init__(self, script):
-        self.script = script  # list of (method, url_prefix, response)
+        self.script = list(script)  # list of (method, url_prefix, response)
         self.calls = []
         self._idx = 0
 
     def _next(self, method, url):
         self.calls.append((method, url))
-        for i, (m, prefix, resp) in enumerate(self.script):
-            if m == method and url.startswith(prefix):
-                # Consume this script entry for this call pattern.
-                return resp() if callable(resp) else resp
-        raise AssertionError(f"no script entry for {method} {url}")
+        while self._idx < len(self.script):
+            m, prefix, resp = self.script[self._idx]
+            if m == method:
+                # Strip query strings for matching
+                url_path = url.split("?")[0]
+                prefix_path = prefix.split("?")[0]
+                if url_path == prefix_path or prefix_path.endswith(url_path) or url_path.startswith(prefix_path):
+                    self._idx += 1
+                    return resp() if callable(resp) else resp
+            self._idx += 1
+        raise AssertionError(f"no script entry for {method} {url} (at index {self._idx})")
 
     def get(self, url, **kwargs):
         return self._next("GET", url)
@@ -80,13 +86,22 @@ def keycloak_redirect_response():
     )
 
 
+def callback_success_response():
+    """LibreChat's callback succeeded; shows the chat page."""
+    return FakeResponse(
+        status_code=200,
+        url="https://chat.example.com/oauth/openid/callback?code=fake-code&state=fake-state",
+        text="<html><body>LibreChat chat page</body></html>",
+    )
+
+
 def limited_response():
-    """LibreChat refuses with auth_rate_limited."""
+    """LibreChat refuses with auth_rate_limited. Reset is 2s from the mocked time (1000.0)."""
     return FakeResponse(
         status_code=429,
         url="https://chat.example.com/oauth/openid/callback",
         text="auth_rate_limited",
-        headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(int(time.time()) + 2)},
+        headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1002"},
     )
 
 
@@ -108,7 +123,7 @@ def config_response():
     )
 
 
-def openid_start_response(remaining="5", reset=None):
+def openid_start_response(remaining="5", reset="1002"):
     headers = {"X-RateLimit-Remaining": remaining}
     if reset is not None:
         headers["X-RateLimit-Reset"] = str(reset)
@@ -122,10 +137,13 @@ def openid_start_response(remaining="5", reset=None):
 
 @pytest.fixture(autouse=True)
 def fake_browser(monkeypatch):
-    """Replace the browser factory with a scripted fake."""
+    """Replace the browser factory with a scripted fake and mock time.sleep."""
     fake = FakeBrowser([])
     monkeypatch.setattr("flows.browser", lambda: fake)
-    monkeypatch.setattr("flows.time", time)
+    # Mock time.sleep to avoid actual waiting; record calls for assertions.
+    sleep_calls = []
+    monkeypatch.setattr("flows.time.sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr("flows.time.time", lambda: 1000.0)  # fixed time for _until_reset
     return fake
 
 
@@ -140,6 +158,7 @@ def test_one_refusal_then_retry_succeeds(fake_browser):
         ("GET", "https://chat.example.com/oauth/openid", lambda: openid_start_response("1")),
         ("GET", "https://sso.example.com/realms/example/protocol/openid-connect/auth", keycloak_form_response),
         ("POST", "https://sso.example.com/realms/example/login", keycloak_redirect_response),
+        ("GET", "https://chat.example.com/oauth/openid/callback", callback_success_response),
         ("POST", "https://chat.example.com/api/auth/refresh", refresh_response),
     ]
 
@@ -181,6 +200,7 @@ def test_no_refusal_succeeds_without_wait(fake_browser):
         ("GET", "https://chat.example.com/oauth/openid", lambda: openid_start_response("5")),
         ("GET", "https://sso.example.com/realms/example/protocol/openid-connect/auth", keycloak_form_response),
         ("POST", "https://sso.example.com/realms/example/login", keycloak_redirect_response),
+        ("GET", "https://chat.example.com/oauth/openid/callback", callback_success_response),
         ("POST", "https://chat.example.com/api/auth/refresh", refresh_response),
     ]
 
