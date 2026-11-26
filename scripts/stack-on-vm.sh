@@ -267,7 +267,8 @@ leaks="$(vm "[ -f $LLM_ENV ] || { echo NOKEY; exit 0; }
   ($IN_STACK && $DC logs --no-color) > $DIR/compose.log 2>&1
   imgs=\$($IN_STACK && $DC config --images 2>/dev/null | grep ':$RUN\$')
   [ -z \"\$imgs\" ] || docker image inspect \$imgs > $DIR/images.json 2>/dev/null
-  sed -n 's/^[A-Za-z0-9_]*_KEY=//p' $LLM_ENV | tr -d '\\r\"' | while IFS= read -r k; do
+  sed -n 's/^[A-Za-z0-9_]*_KEY=//p' $LLM_ENV | sed "s/^export //; s/^[']//; s/[']$//; s/^\"//; s/\"$//" | tr -d '\\r' | while IFS= read -r k; do
+    [ -z "\$k" ] && continue
     [ \${#k} -ge 8 ] || continue
     p=\$(printf %s \"\$k\" | cut -c10-25); [ \${#p} -ge 8 ] || p=\$k
     for f in start.log compose.log checks.out images.json; do

@@ -109,12 +109,13 @@ def _whoami_chat(user):
         return "SKIP no shared LLM key (LITELLM_KEY in /root/shared/llm.env on the test VM, else test-stack/llm.env), see README"
     lc = _chat(user)
     spec = next(x for x in lc.config()["modelSpecs"]["list"] if x["name"] == TEST_DEFAULT_SPEC)
-    calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
+    whoami_prompt = "Use the whoami tool: who am I in iTop?"
+    calls, text = lc.ask(whoami_prompt, spec)
     retried = ""
     if not calls and not text.strip():  # the model sometimes answers nothing: ask once more
         print("chat answer empty, retrying once", flush=True)
         retried = " (after one retry: first answer empty)"
-        calls, text = lc.ask("Use the whoami tool: who am I in iTop?", spec)
+        calls, text = lc.ask(whoami_prompt, spec)
     outputs = " ".join(str(c.get("output")) for c in calls if "whoami" in (c.get("name") or ""))
     assert f"Angemeldet in iTop als: {user[2]} {user[3]}" in outputs, f"tool calls {calls}, answer {text[:200]}"
     return text.strip()[:80] + retried
