@@ -82,6 +82,7 @@ stack can set them instead of patching the groups at run time.
 |---|---|---|---|
 | `TEST_MCP_URL` | all (`common.MCP`) | `https://mcp.example.com/mcp` | The MCP server's public address: the checks call it, compare it with the metadata and config, and expect it in the LibreChat config |
 | `TEST_DEFAULT_SPEC` | `librechat` | `itop-assistant` | The name of the assistant spec LibreChat preselects. With the default the spec must have exactly the itop server; with another name (the combined stack's `combo-assistant`) the itop server must be one of its servers |
+| `TEST_CHAT_SPEC` | `librechat` | `TEST_DEFAULT_SPEC` | The assistant spec used to start chats (whoami checks). Defaults to `TEST_DEFAULT_SPEC` so the repo stack behaves as before; the combined stack sets it to `itop-assistant` while `TEST_DEFAULT_SPEC` is `combo-assistant` |
 
 Set them as environment variables of the client (the combined stack's client sets them before it imports
 a repo's groups):
