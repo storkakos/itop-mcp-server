@@ -37,6 +37,10 @@ services:
     networks:
       net: {}
 
+  setup:
+    environment:
+      TEST_MCP_PREFIX_URL: https://mcp.example.com/itop-mcp/mcp   # setup also registers the prefixed resource
+
   client:
     environment:
       TEST_MCP_PREFIX_URL: https://mcp.example.com/itop-mcp/mcp   # turns on the path-prefix check

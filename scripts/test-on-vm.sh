@@ -63,16 +63,18 @@ git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - \
 # Our own -q only when the caller passes none: pytest counts -q, and -qq drops the summary line.
 quiet=-q
 for arg in "$@"; do
-  case "$arg" in -q*|--quiet|-[!-]*q*) quiet= ;; esac
+  case "$arg" in
+    -q|--quiet) quiet= ;;
+    -[a-z]*q*) ;;
+  esac
 done
 
 # The folder is mounted read-only and copied inside the container, so the install leaves nothing
 # behind in it; --rm removes the container. pytest arguments travel as positional parameters.
 inner='cp -r /src /work && cd /work &&
   export PIP_ROOT_USER_ACTION=ignore PIP_DISABLE_PIP_VERSION_CHECK=1 &&
-  pip install -q --no-deps -r requirements.lock -r requirements-build.lock &&
+  pip install -q --no-deps -r requirements.lock -r requirements-build.lock -r requirements-test.lock &&
   pip install -q --no-deps --no-build-isolation -e . &&
-  pip install -q pytest==8.4.2 &&
   exec pytest '"$quiet"' "$@"'
 remote="docker run --rm --name $CONTAINER -v $DIR:/src:ro $PYTHON_IMAGE sh -c $(printf '%q' "$inner") sh"
 if [ "$#" -gt 0 ]; then

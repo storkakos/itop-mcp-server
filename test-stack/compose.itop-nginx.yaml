@@ -1,0 +1,23 @@
+# TEST ONLY. iTop on nginx + PHP-FPM variant of the test stack. iTop runs on nginx with PHP-FPM
+# instead of Apache; its server block is built at start-up from the nginx code blocks of
+# docs/setup/itop-prerequisites.md (the rewrite rules for the authorization server metadata and
+# the "PHP behind a reverse proxy" settings). The unchanged check list runs against it, plus new
+# checks for the four discovery URLs and the private extension files.
+#
+#   docker compose -f compose.yaml -f compose.itop-nginx.yaml up -d --build
+#   docker compose -f compose.yaml -f compose.itop-nginx.yaml run --rm client python checks.py
+#
+# Combines with compose.nginx.yaml (nginx as TLS proxy); on the test VM:
+# scripts/stack-on-vm.sh --itop-webserver nginx [--nginx].
+services:
+  itop:
+    # Context test-stack/: the image takes install.xml from ./itop, like the Apache image.
+    build:
+      context: .
+      dockerfile: itop-nginx/Dockerfile
+    image: itop-mcp-test-itop-nginx:${TEST_TAG:-3.2.3}
+    volumes:
+      - itop-www:/var/www/itop
+      - downloads:/downloads
+      - ./certs/ca.crt:/certs/ca.crt:ro
+      - ../docs/setup/itop-prerequisites.md:/docs/itop-prerequisites.md:ro

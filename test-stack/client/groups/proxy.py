@@ -21,6 +21,6 @@ def _():
     assert f'resource_metadata="{meta}"' in r.headers["www-authenticate"], r.headers["www-authenticate"]
     d = requests.get(meta).json()
     assert d["resource"] == MCP_PREFIX and d["authorization_servers"] == [ISSUER], d
-    answer = flows.mcp_call(flows.mcp_token("form", LOCAL_USER[0], LOCAL_USER[1]), "whoami", MCP_PREFIX)
+    answer = flows.mcp_call(flows.mcp_token("form", LOCAL_USER[0], LOCAL_USER[1], url=MCP_PREFIX), "whoami", MCP_PREFIX)
     assert f"{LOCAL_USER[2]} {LOCAL_USER[3]}" in answer, answer
     return MCP_PREFIX
