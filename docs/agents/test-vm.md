@@ -64,11 +64,15 @@ A whole run of `test-stack/` (start, checks, clean-up) from Git Bash in your che
 ```sh
 RUN=it-ti02 bash scripts/stack-on-vm.sh                # Caddy stack, all checks
 RUN=it-ti02 bash scripts/stack-on-vm.sh --nginx        # nginx variant (adds compose.nginx.yaml)
+RUN=it-ti02 bash scripts/stack-on-vm.sh --itop-webserver nginx           # iTop on nginx + PHP-FPM
+RUN=it-ti02 bash scripts/stack-on-vm.sh --nginx --itop-webserver nginx   # both: nginx proxy and iTop on nginx
 RUN=it-ti02 bash scripts/stack-on-vm.sh --groups prerequisites,example   # only these check groups
 RUN=it-ti02 bash scripts/stack-on-vm.sh -- -v          # arguments after -- go to checks.py
 ```
 
 It copies the working tree to `/root/itop-mcp-server-$RUN`, takes a VM slot (see [Sharing the VM](#sharing-the-vm)), makes the test certificates, starts the stack as compose project `$RUN` with `TEST_TAG=$RUN` (images `itop-mcp-test-itop:$RUN`, `itop-mcp-server:$RUN`, `itop-mcp-test-client:$RUN`), starts only the services the chosen check groups need (see below), waits until the setup is complete, prints the started containers with their RAM, runs the checks with their output straight through, and exits with their exit code. Afterwards it always takes the stack down with its volumes and removes its images, its folder and its slot, also on failure or Ctrl-C. The build and start output goes to a log on the VM; when the start fails, the script prints its last lines and the setup's log.
+
+**iTop's web server** (`--itop-webserver nginx|apache`, default `apache`): `nginx` adds `test-stack/compose.itop-nginx.yaml`, so iTop runs on nginx + PHP-FPM with the server block built at start-up from the nginx code blocks of `docs/setup/itop-prerequisites.md` (image `itop-mcp-test-itop-nginx:$RUN`). It is independent of `--nginx` (the TLS proxy) and combines with it. To see that iTop really runs on nginx, the start log on the VM and `docker compose -p $RUN logs itop` show `itop-nginx-from-manual: wrote /etc/nginx/conf.d/itop.conf` and the generated block; under Apache that line is missing.
 
 **Check groups** (`--groups`, default `all`): the checks are split into the groups `prerequisites`, `proxy`, `example` (Keycloak and iTop) and `librechat` (see [test-stack/README.md](../../test-stack/README.md#check-groups)). `--groups prerequisites,proxy` runs only those groups and starts only the setup and its dependencies: neither LibreChat nor Mongo. Only a list with `librechat` (or `all`) starts them. Unknown names stop the script before it touches the VM (exit 2). Before the first LibreChat check the checks wait until LibreChat answers (up to 300 s), so they no longer fail right after the setup.
 

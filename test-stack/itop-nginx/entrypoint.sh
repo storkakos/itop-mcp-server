@@ -69,32 +69,47 @@ php_proxy=$(block 2)
 [ -n "$rewrites" ] || fail "manual: first nginx block (rewrites) not found"
 [ -n "$php_proxy" ] || fail "manual: second nginx block (PHP behind a reverse proxy) not found"
 
-# The rewrites block expects to be inside a server block; it has no location wrapper of its own.
-# We build a complete server block: the rewrites go in as-is, and the PHP handling for the rest
-# of iTop uses the "PHP behind a reverse proxy" settings from the manual.
+# Fill in only what the manual leaves to the reader:
+# - Block 1 names the PHP-FPM upstream "php-fpm" ("adjust fastcgi_pass to your upstream"): an
+#   upstream of that name points at the PHP-FPM of this container.
+# - Block 1's index.php location asks for "the same PHP handling as the rest of iTop, including
+#   PHP behind a reverse proxy" and includes fastcgi_params. Block 2 is appended to fastcgi_params,
+#   so it applies there and in the location for the rest of iTop alike. The original file is kept
+#   once, so a restart does not append twice.
+[ -f /etc/nginx/fastcgi_params.orig ] || cp /etc/nginx/fastcgi_params /etc/nginx/fastcgi_params.orig
+{
+  cat /etc/nginx/fastcgi_params.orig
+  echo ""
+  echo "# From docs/setup/itop-prerequisites.md, \"PHP behind a reverse proxy\" (added by the entrypoint)"
+  printf '%s\n' "$php_proxy"
+} > /etc/nginx/fastcgi_params
 {
   echo "# Generated at start-up from docs/setup/itop-prerequisites.md by test-stack/itop-nginx/entrypoint.sh. Do not edit."
+  echo "upstream php-fpm {"
+  echo "    server 127.0.0.1:9000;"
+  echo "}"
+  echo ""
   echo "server {"
-  echo "    listen 80;"
+  echo "    listen 80 default_server;"
   echo "    server_name itop.example.com;"
   echo "    root /var/www/itop;"
   echo "    index index.php;"
   echo ""
-  echo "    # From the manual: authorization server metadata rewrites"
-  printf '%s\n' "$rewrites" | sed 's/^\t/    /'
+  echo "    # From the manual: authorization server metadata rewrites and the private extension directory"
+  printf '%s\n' "$rewrites" | sed 's/^/    /'
   echo ""
-  echo "    # Everything else: PHP-FPM with the manual's \"PHP behind a reverse proxy\" settings"
+  echo "    # Everything else: PHP-FPM (fastcgi_params carries the manual's \"PHP behind a reverse proxy\")"
   echo "    location ~ \.php$ {"
   echo "        try_files \$uri =404;"
   echo "        include fastcgi_params;"
   echo "        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;"
-  echo "        fastcgi_pass 127.0.0.1:9000;"
-  printf '%s\n' "$php_proxy" | sed 's/^\t/        /'
+  echo "        fastcgi_pass php-fpm;"
   echo "    }"
   echo "}"
 } > "$OUT"
 
 echo "itop-nginx-from-manual: wrote $OUT"
+cat "$OUT"
 nginx -t
 
 # iTop cron every minute (requirement in the prerequisites manual). Test credentials.

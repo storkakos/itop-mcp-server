@@ -3,6 +3,8 @@
 #
 #   RUN=it-ti02 bash scripts/stack-on-vm.sh                 # Caddy stack, all checks
 #   RUN=it-ti02 bash scripts/stack-on-vm.sh --nginx         # nginx variant (compose.nginx.yaml)
+#   RUN=it-ti02 bash scripts/stack-on-vm.sh --itop-webserver nginx   # iTop on nginx + PHP-FPM
+#                                                           # (compose.itop-nginx.yaml), with --nginx too
 #   RUN=it-ti02 bash scripts/stack-on-vm.sh --groups prerequisites,proxy   # only these check groups
 #   RUN=it-ti02 bash scripts/stack-on-vm.sh -- -v           # everything after -- goes to checks.py
 #
@@ -44,6 +46,7 @@ set -euo pipefail
 REPO_NAME=itop-mcp-server                      # VM folder /root/$REPO_NAME-$RUN
 STACK_DIR=test-stack                           # folder of the stack's compose files
 COMPOSE_FILES=(-f compose.yaml)                # --nginx adds -f compose.nginx.yaml
+ITOP_WEB_FILE=compose.itop-nginx.yaml          # --itop-webserver nginx adds -f this file (default: Apache)
 PREPARE='sh make-certs.sh >/dev/null'          # run in STACK_DIR on the VM before the start
 CHECKS=(run --rm client python checks.py)      # compose arguments of the check run (groups are added)
 # Compose arguments that print the services to start for the groups that follow (checks.py --services).
@@ -61,6 +64,13 @@ ME=stack-on-vm
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --nginx) COMPOSE_FILES+=(-f compose.nginx.yaml); shift ;;
+    --itop-webserver)
+      case "${2:-}" in
+        nginx) COMPOSE_FILES+=(-f "$ITOP_WEB_FILE") ;;
+        apache) ;;
+        *) echo "$ME: --itop-webserver takes nginx or apache (got '${2:-}')" >&2; exit 2 ;;
+      esac
+      shift 2 ;;
     --groups) [ "$#" -ge 2 ] || { echo "$ME: --groups needs a list, e.g. --groups prerequisites,proxy" >&2; exit 2; }
               GROUPS_ARG="$2"; shift 2 ;;
     --) shift; break ;;

@@ -6,9 +6,15 @@
 #
 #   docker compose -f compose.yaml -f compose.itop-nginx.yaml up -d --build
 #   docker compose -f compose.yaml -f compose.itop-nginx.yaml run --rm client python checks.py
+#
+# Combines with compose.nginx.yaml (nginx as TLS proxy); on the test VM:
+# scripts/stack-on-vm.sh --itop-webserver nginx [--nginx].
 services:
   itop:
-    build: ./itop-nginx
+    # Context test-stack/: the image takes install.xml from ./itop, like the Apache image.
+    build:
+      context: .
+      dockerfile: itop-nginx/Dockerfile
     image: itop-mcp-test-itop-nginx:${TEST_TAG:-3.2.3}
     volumes:
       - itop-www:/var/www/itop
