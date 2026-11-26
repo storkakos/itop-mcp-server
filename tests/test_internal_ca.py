@@ -45,7 +45,7 @@ def test_with_ssl_cert_file_token_check_and_tool_call_succeed(start_server, http
     result = r.json()["result"]
     assert result["isError"] is False
     assert "Max Muster" in result["content"][0]["text"]
-    assert [req.name for req in https_itop.requests] == ["list_operations", "core/get"]
+    assert [req.name for req in https_itop.requests] == ["mcp/token_info", "core/get"]
     assert {req.auth_token for req in https_itop.requests} == {VALID_TOKEN}
 
 

@@ -17,6 +17,7 @@ import pytest
 
 from conftest import VALID_TOKEN
 from itop_mcp_server.config import load_config
+import fake_itop as fakes
 from fake_itop import free_port
 
 RESOURCE_URL = "https://mcp.customer.test/mcp"
@@ -85,6 +86,10 @@ def start_server(tmp_path):
     def start(python_args: list[str] | None = None, **config: str) -> RunningServer:
         port = int(config.setdefault("MCP_PORT", str(free_port())))
         config.setdefault("MCP_AUDIT_LOG", str(tmp_path / "audit.log"))
+        # The fake iTop behind this server issues VALID_TOKEN for this server's own resource.
+        for fake in fakes.ALL:
+            if fake.base_url == config.get("ITOP_BASE_URL") and VALID_TOKEN in fake.valid_tokens:
+                fake.token_info = fakes.oauth_token_info(config.get("MCP_RESOURCE_URL", ""))
         proc = _start(python_args, **config)
         server = RunningServer(proc, f"http://127.0.0.1:{port}")
         started.append(server)
