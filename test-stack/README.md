@@ -105,8 +105,9 @@ Two checks of the group `prerequisites` show that the MCP server accepts only OA
    the MCP server answers `401` with `WWW-Authenticate` naming `resource_metadata`.
 2. `prerequisites: the audit log records the refusal, without the token`: reads the server's audit log
    (`TEST_MCP_AUDIT_LOG`, see [Group settings](#group-settings)) and expects a line with
-   `"user": "lena.local"`, `"tool": null`, `"ok": false`, `"info": "refused: not an OAuth token"`; the
-   token itself must appear nowhere in the log.
+   `"user": "lena.local"`, `"tool": null`, `"ok": false`, `"info": "refused: not an OAuth token"` and the
+   id of exactly this token (`"token"`, the first 12 hex digits of its SHA-256, so a line of an earlier
+   run does not count); the token itself must appear nowhere in the log.
 
 ### Add a check
 

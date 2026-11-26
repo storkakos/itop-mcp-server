@@ -1,6 +1,7 @@
 """TEST ONLY. Browser flows: MCP OAuth through iTop (form or Keycloak login), LibreChat login, connect, chat."""
 import base64
 import hashlib
+import html
 import json
 import os
 import re
@@ -152,9 +153,13 @@ def hand_made_token(user: str, pwd: str, application: str) -> str:
     # "Save": the dialog posts the form to ajax.php, then reloads My Account, which shows the token once.
     r = b.post(TOKEN_AJAX, data=d)
     assert r.status_code == 200 and '"error"' not in r.text, f"save: {r.status_code} {r.text[:200]}"
+    # The tab "My personal tokens" loads its content by Ajax; the page names the URL.
     r = b.get(MY_ACCOUNT)
+    tab = re.search(r"https?://[^\"'\s]*operation=MyAccountTab&(?:amp;)?tab=MyAccount%3ASubTitle%3APersonalTokens", r.text)
+    assert tab, "My Account names no tab URL for 'My personal tokens'"
+    r = b.get(html.unescape(tab.group(0)))
     m = re.search(r"auth_token=(?:<a[^>]*>)?([^<\s\"']+)", r.text)
-    assert m, f"My Account shows no new token: {page_text(r.text, 300)}"
+    assert m, f"'My personal tokens' shows no new token: {page_text(r.text, 300)}"
     return m.group(1)
 
 

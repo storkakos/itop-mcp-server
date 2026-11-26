@@ -1,5 +1,6 @@
 """TEST ONLY. Check group "prerequisites": the check list of docs/setup/itop-prerequisites.md.
 Needs only the setup's part of the stack (no LibreChat, no Mongo)."""
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -82,11 +83,13 @@ def _():
     assert token, "no hand-made token (the check before failed)"
     text = Path(AUDIT_LOG).read_text(encoding="utf-8")
     assert token not in text, "the token is in the audit log"
+    # The server names a token only by its id (first 12 hex digits of its SHA-256): the line of this token.
+    token_id = hashlib.sha256(token.encode()).hexdigest()[:12]
     lines = [json.loads(x) for x in text.splitlines() if x.strip()]
-    hits = [x for x in lines if x.get("info") == "refused: not an OAuth token" and x.get("user") == LOCAL_USER[0]
-            and x.get("tool") is None and x.get("ok") is False]
-    assert hits, f"no refusal line for {LOCAL_USER[0]} in {AUDIT_LOG}: {lines[-3:]}"
-    return f"{len(hits)} refusal line(s), token not in the log"
+    hits = [x for x in lines if x.get("token") == token_id and x.get("info") == "refused: not an OAuth token"
+            and x.get("user") == LOCAL_USER[0] and x.get("tool") is None and x.get("ok") is False]
+    assert hits, f"no refusal line for token {token_id} of {LOCAL_USER[0]} in {AUDIT_LOG}: {lines[-3:]}"
+    return f"refusal line for token {token_id}, token not in the log"
 
 
 @check("prerequisites: all four discovery URLs answer with the metadata")
