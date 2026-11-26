@@ -1,10 +1,55 @@
 """TEST ONLY. The config-itop.php edits of the two manuals, applied as an admin would type them."""
 import re
 
-from common import KC_SECRET_ITOP, MCP
+from common import KC_SECRET_ITOP, MCP, MCP_PREFIX
 
 # docs/setup/itop-prerequisites.md, "Settings in $MyModuleSettings"
-PREREQ_BLOCK = """
+# For the nginx variant (TEST_MCP_PREFIX_URL set), also register the prefixed URL as a resource so
+# the iTop OAuth extension shows a consent page for it. Without it the path-prefix check gets a 401.
+if MCP_PREFIX:
+    PREREQ_BLOCK = """
+	'authent-token' => array(
+		// Only the profiles that should use the assistant. No Administrator (see above).
+		'personal_tokens_allowed_profiles' => array('Service Desk Agent', 'Support Agent'),
+		// Shows "Personal Tokens" under My Account, where users see and end their connections.
+		'enable_myaccount_menu' => true,
+	),
+
+	'altioo-oauth-server' => array(
+		// The MCP client's callback, exactly as the client sends it.
+		'redirect_uris' => array(
+			'https://chat.example.com/api/mcp/itop/oauth/callback',
+		),
+		// Callbacks on localhost/127.0.0.1 are for local tests only. Keep false in production.
+		'allow_loopback' => false,
+
+		'access_token_lifetime' => 3600, // seconds
+		'grant_idle_days' => 30,
+		'max_grant_days' => 90,
+
+		'resources' => array(
+			'itop-mcp' => array(
+				'url' => '%s',
+				'label' => 'iTop assistant',
+				'scope_prefix' => 'REST/JSON',
+				'default_scopes' => array('REST/JSON'),
+				'bearer_methods' => array('header'),
+				'required_profiles' => array('Service Desk Agent', 'Support Agent'),
+			),
+			'itop-mcp-prefix' => array(
+				'url' => '%s',
+				'label' => 'iTop assistant',
+				'scope_prefix' => 'REST/JSON',
+				'default_scopes' => array('REST/JSON'),
+				'bearer_methods' => array('header'),
+				'required_profiles' => array('Service Desk Agent', 'Support Agent'),
+			),
+		),
+	),
+
+""" % (MCP, MCP_PREFIX)
+else:
+    PREREQ_BLOCK = """
 	'authent-token' => array(
 		// Only the profiles that should use the assistant. No Administrator (see above).
 		'personal_tokens_allowed_profiles' => array('Service Desk Agent', 'Support Agent'),
