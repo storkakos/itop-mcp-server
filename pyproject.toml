@@ -19,8 +19,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Exact test tree incl. transitive packages: requirements-test.lock (used by scripts/test-on-vm.sh)
 test = [
     "pytest==8.4.2",
+    "requests==2.32.5",
+    "beautifulsoup4==4.13.5",
+    "lxml==6.0.2",
 ]
 
 [project.scripts]

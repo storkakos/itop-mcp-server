@@ -351,6 +351,15 @@ checks and does **not** mean a successful start; look at the lines after it.
 tokens); `Token-Pruefung fehlgeschlagen … iTop nicht erreichbar` means the container cannot reach
 iTop (network, proxy, or certificate, see [Internal CA](#internal-ca)).
 
+**Every request gets `401`, and the log says `iTop kennt mcp/token_info nicht`.** The iTop extension
+`mcp-token-info` is missing or not ticked in the setup wizard. Install it as described in
+[the prerequisites](docs/setup/itop-prerequisites.md#install-the-extensions).
+
+**A personal token made by hand under *My Account* works with iTop's `rest.php` but gets `401` from
+the MCP server.** By design: the MCP server accepts only OAuth tokens issued for its own
+`MCP_RESOURCE_URL` (log: `kein OAuth-Token` or `Resource … ist nicht …`). See
+[Which tokens the MCP server accepts](docs/setup/itop-prerequisites.md#which-tokens-the-mcp-server-accepts).
+
 **`421 Misdirected Request` through the reverse proxy** (on every path, with or without a token). The
 proxy does not pass the public `Host` header, or `MCP_RESOURCE_URL` names another host. See [Reverse proxy](#reverse-proxy-tls).
 

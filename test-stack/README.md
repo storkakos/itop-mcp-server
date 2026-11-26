@@ -72,6 +72,25 @@ check of the group `librechat`, the checks wait until LibreChat answers (`/healt
 offers the Keycloak login), up to `LIBRECHAT_READY_TIMEOUT` seconds (default 300). If it does not,
 every check of the group fails with "not run: LibreChat at … not ready within … s".
 
+### Group settings
+
+Some check groups take values from the stack they run on as **group settings** (see combined-test-stack
+GLOSSARY). The defaults are the repo stack's values, so the repo stack behaves as before. The combined
+stack can set them instead of patching the groups at run time.
+
+| Setting | Group | Default | Description |
+|---|---|---|---|
+| `TEST_MCP_URL` | all (`common.MCP`) | `https://mcp.example.com/mcp` | The MCP server's public address: the checks call it, compare it with the metadata and config, and expect it in the LibreChat config |
+| `TEST_DEFAULT_SPEC` | `librechat` | `itop-assistant` | The name of the assistant spec LibreChat preselects. With the default the spec must have exactly the itop server; with another name (the combined stack's `combo-assistant`) the itop server must be one of its servers |
+| `TEST_CHAT_SPEC` | `librechat` | `TEST_DEFAULT_SPEC` | The assistant spec used to start chats (whoami checks). Defaults to `TEST_DEFAULT_SPEC` so the repo stack behaves as before; the combined stack sets it to `itop-assistant` while `TEST_DEFAULT_SPEC` is `combo-assistant` |
+
+Set them as environment variables of the client (the combined stack's client sets them before it imports
+a repo's groups):
+
+```sh
+docker compose run --rm -e TEST_DEFAULT_SPEC=combo-assistant client python checks.py librechat
+```
+
 ### Add a check
 
 Add it to the group's file, under the other checks of that group:
@@ -187,7 +206,26 @@ volumes stay.
   401 with the prefixed metadata URL, the metadata itself, and whoami with a token. The token comes
   from the normal OAuth flow; the server does not check the token's resource.
 - `itop.example.com`, `sso.example.com` and `chat.example.com` are plain proxy blocks of the stack
-  (`nginx/stack.conf`). iTop itself stays on Apache.
+  (`nginx/stack.conf`). iTop itself stays on Apache; for iTop on nginx see the next section.
+
+## iTop on nginx and PHP-FPM
+
+`compose.itop-nginx.yaml` replaces iTop's Apache with nginx + PHP-FPM (image built from
+`itop-nginx/`, context `test-stack/`). At start-up `itop-nginx/entrypoint.sh` takes the two nginx
+code blocks of [docs/setup/itop-prerequisites.md](../docs/setup/itop-prerequisites.md#nginx) and
+builds iTop's server block from them: the rewrites and the private extension directory go in as
+they are, the "PHP behind a reverse proxy" lines are appended to `fastcgi_params`, and an upstream
+`php-fpm` points at the container's PHP-FPM. The generated file is printed in `docker compose logs
+itop`. If a block is missing or nginx refuses it, iTop does not start. It combines with the nginx
+TLS proxy:
+
+```sh
+docker compose -f compose.yaml -f compose.itop-nginx.yaml up -d --build
+docker compose -f compose.yaml -f compose.nginx.yaml -f compose.itop-nginx.yaml up -d --build   # both
+```
+
+On the test VM: `scripts/stack-on-vm.sh --itop-webserver nginx [--nginx]`. The `itop-www` volume
+is the same as in the Apache variant, so `up -d` with the other set of files switches an existing stack.
 
 ## Reach the services with IP and port (optional)
 
@@ -263,12 +301,18 @@ LibreChat's default a single run already reaches the limit and a second run righ
   `docs/setup/example-keycloak-librechat.md` keeps LibreChat's normal limit: a real install should not
   raise it. To try the checks with the normal limit:
   `TEST_LIBRECHAT_LOGIN_MAX=7 docker compose up -d librechat` (recreates only LibreChat).
+- **`LIBRECHAT_LOGIN_WINDOW`**: if LibreChat does not send an `X-RateLimit-Reset` header, the checks
+  fall back to waiting a whole window. The length of that window is taken from `LIBRECHAT_LOGIN_WINDOW`
+  (minutes, default 5, LibreChat's default). Set it if you change `LOGIN_WINDOW` on your LibreChat
+  instance.
 - **When a check still hits it** (normal limit, or another client on the same IP): before a login the
   checks look at LibreChat's `X-RateLimit-Remaining`; when the budget is used up they wait for the window
   to end (`X-RateLimit-Reset`) and go on. When LibreChat answers `auth_rate_limited` anyway, they wait for
   the window and try the login once more. Refused again, the check reports **SKIP** with the reason, and
   so do the checks that need that login; the limit never makes a check FAIL. A wait shows in the check's
-  line (`waited N s for LibreChat's login limit`) and makes that run up to five minutes longer.
+  line (`waited N s for LibreChat's login limit`). In the worst case one login waits up to three times:
+  once before starting (pre-check), once after the first refusal, and once before the retry starts
+  (pre-check again inside the retry).
 - **Reset**: LibreChat keeps the count in memory, so restarting it starts a new window:
   `docker compose restart librechat` (with `-p $RUN` on the VM). The checks wait until it answers again.
 

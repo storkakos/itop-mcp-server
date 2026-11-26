@@ -16,6 +16,7 @@ from collections import Counter
 from bs4 import BeautifulSoup
 
 import flows
+from checklib import Skip
 from common import CHAT, ITOP, KC_USERS, follow, itop_rest, page_text, say
 
 
@@ -90,7 +91,11 @@ def verdict(res: dict, b=KC_USERS[1]) -> str:
 
 
 if __name__ == "__main__":
-    result = run(log=lambda step, value: say(f"{step}: {value}"))
+    try:
+        result = run(log=lambda step, value: say(f"{step}: {value}"))
+    except Skip as e:
+        say("SKIP", e)
+        sys.exit(0)
     try:
         say("PASS", verdict(result))
     except AssertionError as e:

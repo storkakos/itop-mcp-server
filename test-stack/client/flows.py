@@ -85,10 +85,11 @@ def mcp_oauth_flow(login: str, user: str, pwd: str) -> str:
     return mcp_call(mcp_token(login, user, pwd), "whoami")
 
 
-def mcp_token(login: str, user: str, pwd: str) -> str:
-    """The OAuth part of mcp_oauth_flow: returns the access token for the MCP server."""
+def mcp_token(login: str, user: str, pwd: str, url: str = MCP) -> str:
+    """The OAuth part of mcp_oauth_flow: returns an access token for the MCP server at url (the 401 request
+    and the resource_metadata come from that URL)."""
     c = requests.Session()
-    r = c.post(MCP, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    r = c.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
                headers={"Accept": "application/json, text/event-stream"})
     assert r.status_code == 401, r.status_code
     prm = c.get(re.search(r'resource_metadata="([^"]+)"', r.headers["www-authenticate"]).group(1)).json()
