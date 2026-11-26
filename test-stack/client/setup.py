@@ -38,8 +38,9 @@ def main() -> None:
     if not (ext / "combodo-hybridauth" / "module.combodo-hybridauth.php").exists():
         zipfile.ZipFile("/downloads/combodo-hybridauth-2.1.1.zip").extractall(ext)
         shutil.move(str(ext / "combodo-hybridauth-2.1.1"), str(ext / "combodo-hybridauth"))
-    if not (ext / "mcp-token-info" / "extension.xml").exists():
-        zipfile.ZipFile("/downloads/mcp-token-info-0.1.0.zip").extractall(ext)
+    # This repo's own extension: copied from the source folder (same files as the ZIP from
+    # itop-extension/build.py), every time, so that a changed extension reaches a running stack.
+    shutil.copytree("/ext-src/mcp-token-info", ext / "mcp-token-info", dirs_exist_ok=True)
     chown_tree(ext)
     for p in ("datamodels/2.x/combodo-oauth2-client/module.combodo-oauth2-client.php",
               "datamodels/2.x/itop-attribute-encrypted-password/module.itop-attribute-encrypted-password.php"):

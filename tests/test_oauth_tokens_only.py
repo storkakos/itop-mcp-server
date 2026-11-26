@@ -120,3 +120,63 @@ def test_valid_token_initialize_works(client, itop):
     r = client.post("initialize", token=VALID_TOKEN)
 
     assert r.status_code == 200
+
+
+def test_refused_hand_made_token_is_audited_without_the_secret(client, itop, audit):
+    itop.token_info = {"class": "PersonalToken", "id": 2, "oauth": False, "resource": None,
+                       "scopes": ["REST/JSON"], "expires_at": None}
+
+    assert client.call_tool("whoami").status_code == 401
+
+    [entry] = audit.entries()
+    assert entry["tool"] is None and entry["ok"] is False
+    assert entry["user"] == "testuser"
+    assert entry["info"] == "refused: not an OAuth token"
+    assert entry["token"] and VALID_TOKEN not in audit.raw()
+
+
+def test_refused_foreign_resource_token_is_audited(client, itop, audit):
+    itop.token_info = {"class": "PersonalToken", "id": 3, "oauth": True,
+                       "resource": {"key": "other", "url": "https://other.example.test/mcp"},
+                       "scopes": ["REST/JSON"], "expires_at": None}
+
+    assert client.call_tool("whoami").status_code == 401
+
+    [entry] = audit.entries()
+    assert entry["info"] == "refused: OAuth token for another resource"
+    assert VALID_TOKEN not in audit.raw()
+
+
+def test_missing_extension_is_audited_and_logged_clearly(client, itop, audit, caplog):
+    itop.token_info_unknown = True
+
+    with caplog.at_level("ERROR", logger="itop-mcp-server"):
+        assert client.call_tool("whoami").status_code == 401
+
+    [entry] = audit.entries()
+    assert entry["info"] == "refused: iTop extension mcp-token-info missing"
+    assert any("mcp-token-info" in r.getMessage() for r in caplog.records)
+
+
+def test_resource_with_trailing_slash_and_upper_case_host_is_own_resource(client, itop):
+    itop.token_info["resource"] = {"key": "mcp", "url": RESOURCE_URL.replace("mcp.example.test", "MCP.example.test") + "/"}
+
+    assert client.call_tool("whoami").status_code == 200
+
+
+def test_resource_with_other_path_is_refused(client, itop):
+    itop.token_info["resource"] = {"key": "mcp", "url": RESOURCE_URL + "/other"}
+
+    assert client.call_tool("whoami").status_code == 401
+    assert [req.name for req in itop.requests] == ["mcp/token_info"]
+
+
+def test_expired_oauth_token_is_refused(client, itop):
+    itop.token_info["expires_at"] = 1_000_000_000  # 2001
+
+    assert client.call_tool("whoami").status_code == 401
+
+
+def test_unknown_token_is_refused_without_audit_line(client, itop, audit):
+    assert client.call_tool("whoami", token="not-a-known-token-0123456789").status_code == 401
+    assert audit.entries() == []

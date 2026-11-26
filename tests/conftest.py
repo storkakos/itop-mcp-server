@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from fake_itop import FakeITop, free_port, serve_in_thread
+from fake_itop import FakeITop, free_port, oauth_token_info, serve_in_thread
 
 RESOURCE_URL = "https://mcp.example.test/mcp"
 ISSUER = "https://itop.example.test/env-production/altioo-oauth-server"
@@ -55,15 +55,7 @@ def itop(fake_itop) -> FakeITop:
     """The fake iTop, reset for each test, accepting VALID_TOKEN as an OAuth token for RESOURCE_URL."""
     fake_itop.reset()
     fake_itop.valid_tokens.add(VALID_TOKEN)
-    # Default: VALID_TOKEN is a valid OAuth token for RESOURCE_URL
-    fake_itop.token_info = {
-        "class": "PersonalToken",
-        "id": 1,
-        "oauth": True,
-        "resource": {"key": "mcp", "url": RESOURCE_URL},
-        "scopes": ["REST/JSON"],
-        "expires_at": None,
-    }
+    fake_itop.token_info = oauth_token_info(RESOURCE_URL)
     return fake_itop
 
 

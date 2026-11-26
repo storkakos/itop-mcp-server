@@ -48,7 +48,6 @@ services:
       - itop-www:/var/www/itop
       - downloads:/downloads
       - ./certs/ca.crt:/certs/ca.crt:ro
-      - ../itop-extension/mcp-token-info:/opt/itop-test/mcp-token-info:ro
     <<: *net
 
   # SMTP for Keycloak's "Verify email". Web UI/API on port 8025 inside the network.
@@ -96,6 +95,7 @@ services:
     volumes:
       - itop-www:/var/www/itop
       - downloads:/downloads:ro
+      - ../itop-extension/mcp-token-info:/ext-src/mcp-token-info:ro   # this repo's extension, copied as is
       - ./certs/ca.crt:/ca.crt:ro
       - ../README.md:/docs/README.md:ro      # group consent compares the docs' wording with iTop
       - ../docs:/docs/docs:ro

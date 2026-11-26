@@ -30,6 +30,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import AnyHttpUrl, ValidationError
 from starlette.responses import PlainTextResponse
 
 from . import __version__
@@ -139,6 +140,33 @@ def _client_for_current_request() -> ITopTokenClient:
 upstream.get_itop_client = _client_for_current_request
 
 
+def _same_resource(a: str, b: str) -> bool:
+    """Vergleich wie die SDK-Pruefung: als URL (Gross-/Kleinschreibung des Hosts, Standard-Port), ein
+    Schraegstrich am Ende zaehlt nicht."""
+    try:
+        return str(AnyHttpUrl(a)).removesuffix("/") == str(AnyHttpUrl(b)).removesuffix("/")
+    except ValidationError:
+        return False
+
+
+def _audit_refused_bearer(token: str, user: str, reason: str) -> None:
+    """Audit-Zeile fuer ein Token, das iTop kennt, das der Server aber ablehnt (kein OAuth-Token, fremde
+    Resource, Extension fehlt). Die Anfrage bekommt 401, bevor ein Tool laeuft: "tool" ist null, und das
+    Token selbst wird nie geschrieben, nur seine Kennung."""
+    AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "user": user or "?",
+        "token": _token_id(token),
+        "tool": None,
+        "args": {},
+        "ok": False,
+        "info": _redact(f"refused: {reason}")[:300],
+    }
+    with AUDIT_LOG.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 class ITopTokenVerifier(TokenVerifier):
     """Prueft das Bearer-Token bei iTop ueber mcp/token_info (Ticket dolibarr-parity 07).
 
@@ -146,6 +174,8 @@ class ITopTokenVerifier(TokenVerifier):
     1. bei iTop gueltig ist (code==0),
     2. ueber OAuth ausgestellt wurde (token.oauth==true) und
     3. fuer die eigene Resource ausgestellt wurde (token.resource.url == MCP_RESOURCE_URL).
+    Die Resource wird im AccessToken mitgegeben; die SDK-Pruefung (validate_token_resource) vergleicht
+    sie ein zweites Mal mit MCP_RESOURCE_URL.
     """
 
     async def verify_token(self, token: str) -> AccessToken | None:
@@ -158,28 +188,36 @@ class ITopTokenVerifier(TokenVerifier):
             log.warning("Token-Pruefung fehlgeschlagen (%s): %s", _token_id(token), _redact(str(e)))
             return None
         code = res.get("code")
-        if code != 0:
-            if code == 11:
-                log.error("Extension mcp-token-info nicht installiert oder nicht erreichbar (%s)", _token_id(token))
-            else:
-                log.info("Token abgelehnt (%s): code=%s", _token_id(token), code)
+        if code == 11:
+            # Unbekannte Operation: die iTop-Extension mcp-token-info fehlt. Ohne sie laesst der Server
+            # niemanden herein (README, Troubleshooting).
+            log.error("iTop kennt mcp/token_info nicht: Extension mcp-token-info ist nicht installiert. "
+                      "Ohne sie lehnt der Server jedes Token ab (docs/setup/itop-prerequisites.md).")
+            _audit_refused_bearer(token, "?", "iTop extension mcp-token-info missing")
             return None
+        if code != 0:
+            log.info("Token abgelehnt (%s): code=%s", _token_id(token), code)
+            return None
+        itop_user = res.get("user")
+        user = str(itop_user.get("login") or "?") if isinstance(itop_user, dict) else "?"
         token_info = res.get("token")
         if not isinstance(token_info, dict):
-            log.info("Token abgelehnt (%s): kein Token in der Antwort (kein Token-Login)", _token_id(token))
+            log.info("Token abgelehnt (%s): kein Token-Login", _token_id(token))
+            _audit_refused_bearer(token, user, "not a token login")
             return None
-        if not token_info.get("oauth", False):
-            log.info("Token abgelehnt (%s): kein OAuth-Token (hand-made personal token)", _token_id(token))
+        if token_info.get("oauth") is not True:
+            log.info("Token abgelehnt (%s): kein OAuth-Token (selbst angelegtes persoenliches Token)", _token_id(token))
+            _audit_refused_bearer(token, user, "not an OAuth token")
             return None
         resource = token_info.get("resource")
-        if not isinstance(resource, dict):
-            log.info("Token abgelehnt (%s): keine Resource in der Antwort", _token_id(token))
+        resource_url = resource.get("url") if isinstance(resource, dict) else None
+        if not isinstance(resource_url, str) or not _same_resource(resource_url, MCP_RESOURCE_URL):
+            log.info("Token abgelehnt (%s): Resource %r ist nicht %s", _token_id(token), resource_url, MCP_RESOURCE_URL)
+            _audit_refused_bearer(token, user, "OAuth token for another resource")
             return None
-        resource_url = resource.get("url", "")
-        if resource_url != MCP_RESOURCE_URL:
-            log.info("Token abgelehnt (%s): Resource %s != %s", _token_id(token), resource_url, MCP_RESOURCE_URL)
-            return None
-        return AccessToken(token=token, client_id="itop-personal-token", scopes=["REST/JSON"])
+        exp = token_info.get("expires_at")
+        return AccessToken(token=token, client_id="itop-oauth", scopes=["REST/JSON"], resource=resource_url,
+                           expires_at=exp if isinstance(exp, int) and not isinstance(exp, bool) else None)
 
 
 mcp = upstream.mcp
@@ -191,9 +229,9 @@ mcp.settings.auth = AuthSettings(
     issuer_url=ITOP_ISSUER,
     resource_server_url=MCP_RESOURCE_URL,
     required_scopes=["REST/JSON"],
-    # Das Token wird vom ITopTokenVerifier ueber mcp/token_info geprueft, das auch die Resource
-    # zurueckgibt. Die SDK-Pruefung ist damit eingeschaltet und bestaetigt, dass das Token fuer
-    # MCP_RESOURCE_URL ausgestellt wurde (Ticket dolibarr-parity 07).
+    # Eingeschaltet (Ticket dolibarr-parity 07): mcp/token_info nennt die Resource, fuer die das Token
+    # ausgestellt wurde, und der ITopTokenVerifier gibt sie im AccessToken weiter. Nie ausschalten
+    # und nie mit MCP_RESOURCE_URL vorbelegen: dann kaeme jedes Token durch.
     validate_token_resource=True,
 )
 mcp._token_verifier = ITopTokenVerifier()

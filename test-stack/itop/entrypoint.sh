@@ -27,11 +27,6 @@ fetch altioo-oauth-server-0.1.0.zip "https://github.com/AltiooBV/altioo-oauth-se
   d8933b65e2250d029238923efc0a4acff4b80a099b815a43dad97a0d30b6e320
 fetch combodo-hybridauth-2.1.1.zip "https://github.com/Combodo/combodo-hybridauth/archive/refs/tags/2.1.1.zip" \
   5ddb33cc94669d65e540d51a484a56fc7b5a38bfe8f73f8709d217653d6ab3e6
-# mcp-token-info: built from the repo's itop-extension/mcp-token-info/ (ticket dolibarr-parity 06)
-if [ ! -f "/downloads/mcp-token-info-0.1.0.zip" ]; then
-  echo "building mcp-token-info-0.1.0.zip"
-  (cd /opt/itop-test/mcp-token-info && zip -r /downloads/mcp-token-info-0.1.0.zip . -x "*.git*")
-fi
 
 W=/var/www/itop
 if [ ! -f "$W/index.php" ]; then

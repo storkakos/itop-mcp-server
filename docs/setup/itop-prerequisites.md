@@ -5,7 +5,9 @@
 access token that the MCP client sends to the MCP server. The MCP server only forwards that token to
 iTop's REST/JSON API. It stores no user secrets and issues no tokens.
 
-The MCP server needs only the altioo-oauth-server extension. Logging into iTop through an
+The MCP server needs the altioo-oauth-server extension and this repository's small `mcp-token-info`
+extension (it tells the MCP server whether a token was issued through OAuth, and for which resource;
+see [Which tokens the MCP server accepts](#which-tokens-the-mcp-server-accepts)). Logging into iTop through an
 **identity provider** (for example Keycloak) is optional: it needs the combodo-hybridauth extension
 and its two helper extensions, which this manual lists and installs alongside, marked *only with an
 identity provider*. How to connect hybridauth to Keycloak is described in
@@ -76,6 +78,7 @@ Download from the vendor and check the SHA256 before installing.
 | Extension | Version | Download | SHA256 | Licence |
 |---|---|---|---|---|
 | altioo-oauth-server | `v0.1.0` | [altioo-oauth-server-0.1.0.zip](https://github.com/AltiooBV/altioo-oauth-server/releases/download/v0.1.0/altioo-oauth-server-0.1.0.zip) | `d8933b65e2250d029238923efc0a4acff4b80a099b815a43dad97a0d30b6e320` | [AGPL-3.0-or-later](https://github.com/AltiooBV/altioo-oauth-server/blob/v0.1.0/LICENSE) |
+| mcp-token-info | `0.1.0` | built from this repository: `python itop-extension/build.py` writes `itop-extension/dist/mcp-token-info-0.1.0.zip` and prints its SHA256 | reproducible, printed by `build.py` | MIT, see [`itop-extension/mcp-token-info/LICENSE`](../../itop-extension/mcp-token-info/LICENSE) |
 
 **Only with an identity provider** (login to iTop through Keycloak or another OpenID Connect
 provider). combodo-hybridauth depends on combodo-oauth2-client (which ships the HybridAuth library,
@@ -124,7 +127,9 @@ it starts with a blank one. A backup of the whole iTop directory is safest, beca
 ### 2. Copy the extensions
 
 Unpack the ZIP into iTop's `extensions/` folder so that `extensions/altioo-oauth-server/README.md`
-exists. Make sure the web server user can read the files.
+exists. Unpack `mcp-token-info-0.1.0.zip` the same way, so that
+`extensions/mcp-token-info/module.mcp-token-info.php` exists. Make sure the web server user can read
+the files.
 
 **Only with an identity provider:** the GitHub tag archive unpacks into a folder with the version
 in its name (`combodo-hybridauth-2.1.1/`). Rename the folder to the extension's name, so that this
@@ -170,7 +175,8 @@ attrib -R C:\inetpub\itop\conf\production\config-itop.php
    existing iTop instance**.
 2. In the last extensions step ("Select additional extensions to install"), **tick Altioo OAuth
    Server** (altioo-oauth-server). On an upgrade, new extensions are **not** ticked by default. If
-   you skip this, the extension is not installed and nothing below works.
+   you skip this, the extension is not installed and nothing below works. Also **tick MCP token
+   info** (mcp-token-info): without it the MCP server refuses every token.
    **Only with an identity provider:** also tick **oAuth/OpenID authentication**. That is
    combodo-hybridauth: it has no `extension.xml`, so the wizard shows it as its own checkbox under
    its module label, and it is not ticked either. combodo-oauth2-client and
@@ -328,7 +334,10 @@ operation (provided by the `mcp-token-info` extension) and accepts the token onl
 
 Hand-made personal tokens from *My Account* (`token.oauth: false`) are rejected, as are tokens
 issued for other resources. The MCP server therefore needs the `mcp-token-info` extension installed
-and enabled on the iTop side; without it, every token is rejected.
+and enabled on the iTop side; without it, every token is rejected and the MCP server logs
+`iTop kennt mcp/token_info nicht: Extension mcp-token-info ist nicht installiert` on each request.
+Every refused token also gets an audit line with `"tool": null`, `"ok": false` and the reason in
+`info` (never the token itself).
 
 To keep the assistant to the people meant for it:
 
